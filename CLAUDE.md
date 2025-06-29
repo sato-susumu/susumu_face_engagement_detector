@@ -14,7 +14,7 @@
 ### アーキテクチャ設計
 元の統合型ノード（face_engagement_node.py）を以下の4つのノードに分割：
 
-1. **face_detection_node.py** - 顔検出とエンコーディング生成
+1. **face_detection_node.py** - 顔検出と顔特徴量生成
 2. **face_recognition_node.py** - 顔識別（既知顔優先）
 3. **gaze_analysis_node.py** - 注視状態判定
 4. **engagement_manager_node.py** - 全体状態管理とイベント発行
@@ -104,7 +104,7 @@ engagement_manager_node → face_event, gaze_event
 ## 重要な実装詳細
 
 ### メッセージフォーマット
-- **face_detections**: `face_idx|center_x|center_y|width|height|frame_width|frame_height|encoding_csv`
+- **face_detections**: `face_idx|center_x|center_y|width|height|frame_width|frame_height|feature_csv`
 - **face_identities**: `face_id|center_x|center_y|width|height|frame_width|frame_height`
 - **gaze_status**: `face_id|status|center_x|center_y|width|height`
 - **face_event**: `face_id:DETECTED|LOST`
