@@ -1,0 +1,4 @@
+face_detection_node:
+  ros__parameters:
+    image_topic: '/image'
+    detection_model: 'hog'  # 'hog' or 'cnn'

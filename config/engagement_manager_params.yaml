@@ -1,0 +1,3 @@
+engagement_manager_node:
+  ros__parameters:
+    face_timeout: 1.0

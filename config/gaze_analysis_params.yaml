@@ -1,0 +1,4 @@
+gaze_analysis_node:
+  ros__parameters:
+    gaze_threshold_px: 50
+    gaze_duration: 2.0

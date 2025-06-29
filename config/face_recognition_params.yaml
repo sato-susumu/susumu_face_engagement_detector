@@ -1,0 +1,4 @@
+face_recognition_node:
+  ros__parameters:
+    known_faces_dir: 'known_faces'
+    match_tolerance: 0.6
