@@ -54,9 +54,8 @@ class FaceEngagementMonitor(Node):
     def __init__(self):
         super().__init__('face_engagement_monitor')
         
-        # 監視対象トピック定義
+        # 監視対象トピック定義（image_topicは後で動的に設定）
         self.topics = {
-            '/camera/color/image_raw': (Image, 'input'),
             '/face_detections': (String, 'output'),
             '/face_identities': (String, 'output'),
             '/gaze_status': (String, 'output'),
@@ -72,10 +71,16 @@ class FaceEngagementMonitor(Node):
         self.declare_parameter('refresh_rate', 1.0)
         self.declare_parameter('show_content', True)
         self.declare_parameter('log_to_file', False)
+        self.declare_parameter('image_topic', '/camera/color/image_raw')
         
         self.refresh_rate = self.get_parameter('refresh_rate').get_parameter_value().double_value
         self.show_content = self.get_parameter('show_content').get_parameter_value().bool_value
         self.log_to_file = self.get_parameter('log_to_file').get_parameter_value().bool_value
+        image_topic = self.get_parameter('image_topic').get_parameter_value().string_value
+        
+        # 画像トピックを動的に追加
+        self.topics[image_topic] = (Image, 'input')
+        self.image_topic = image_topic  # 後で参照用に保存
         
         # 各トピックの購読設定
         self.setup_subscriptions()
@@ -251,7 +256,7 @@ class FaceEngagementMonitor(Node):
         print("-" * 40)
         
         # 全体の処理レート
-        input_hz = self.monitors['/camera/color/image_raw'].hz
+        input_hz = self.monitors[self.image_topic].hz
         output_hz = max([
             self.monitors['/face_detections'].hz,
             self.monitors['/face_identities'].hz,
@@ -274,9 +279,9 @@ class FaceEngagementMonitor(Node):
         print("\n🔄 Data Flow:")
         print("-" * 40)
         
-        # パイプライン表示
+        # パイプライン表示（画像トピックを動的に設定）
         pipeline = [
-            ("/camera/color/image_raw", "📹"),
+            (self.image_topic, "📹"),
             ("/face_detections", "👤"),
             ("/face_identities", "🔍"),
             ("/gaze_status", "👁️"),
@@ -299,7 +304,7 @@ class FaceEngagementMonitor(Node):
             print("\n📝 Latest Messages:")
             print("-" * 40)
             for topic_name, monitor in self.monitors.items():
-                if monitor.last_message_content and topic_name != '/camera/color/image_raw':
+                if monitor.last_message_content and topic_name != self.image_topic:
                     content = monitor.last_message_content
                     if len(content) > 60:
                         content = content[:60] + "..."
