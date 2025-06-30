@@ -31,6 +31,7 @@ setup(
             'gaze_analysis_node = susumu_face_engagement_detector.gaze_analysis_node:main',
             'engagement_manager_node = susumu_face_engagement_detector.engagement_manager_node:main',
             'face_engagement_node = susumu_face_engagement_detector.face_engagement_node:main',
+            'monitoring_node = susumu_face_engagement_detector.monitoring_node:main',
         ],
     },
 )
