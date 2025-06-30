@@ -93,6 +93,9 @@ ros2 launch susumu_face_engagement_detector monitoring.launch.py
 
 # カスタム設定
 ros2 launch susumu_face_engagement_detector monitoring.launch.py refresh_rate:=0.5 show_content:=false log_to_file:=true
+
+# 異なる画像トピックを使用
+ros2 launch susumu_face_engagement_detector monitoring.launch.py image_topic:=/image
 ```
 
 #### モニタリング機能
@@ -106,6 +109,7 @@ ros2 launch susumu_face_engagement_detector monitoring.launch.py refresh_rate:=0
 - `refresh_rate`: 画面更新間隔（秒、デフォルト: 1.0）
 - `show_content`: メッセージ内容表示（デフォルト: true）
 - `log_to_file`: ログファイル出力（デフォルト: false）
+- `image_topic`: 入力画像トピック名（デフォルト: /camera/color/image_raw）
 
 ## パラメータ設定
 
