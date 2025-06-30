@@ -32,6 +32,7 @@ setup(
             'engagement_manager_node = susumu_face_engagement_detector.engagement_manager_node:main',
             'face_engagement_node = susumu_face_engagement_detector.face_engagement_node:main',
             'monitoring_node = susumu_face_engagement_detector.monitoring_node:main',
+            'test_camera_node = susumu_face_engagement_detector.test_camera_node:main',
         ],
     },
 )

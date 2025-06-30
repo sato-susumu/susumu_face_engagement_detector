@@ -8,7 +8,17 @@
 
 顔検出・認識・注視判定を行うROS2パッケージです。効率的な動作のため、複数のノードに分割して実装されています。
 
-## 構成
+## 🎯 概要
+
+このシステムは以下の機能を提供します：
+
+- **👤 顔検出**: カメラ画像からリアルタイムで顔を検出
+- **🔍 顔認識**: 既知の人物の識別と新規人物の追跡
+- **👁️ 注視分析**: カメラに向けた注視状態の判定
+- **📢 イベント通知**: 顔の出現・消失、注視開始・終了の通知
+- **📊 リアルタイム監視**: システム全体の動作状況監視
+
+## 🏗️ アーキテクチャ
 
 ### ノード構成
 - **face_detection_node**: 画像から顔を検出し、顔特徴量を生成
@@ -16,164 +26,166 @@
 - **gaze_analysis_node**: 顔の位置から注視状態を判定
 - **engagement_manager_node**: 全体の状態管理とイベント発行
 
-### トピック構成
+### データフロー
 ```
-/camera/color/image_raw (sensor_msgs/Image) → face_detection_node
-  ↓ face_detections (std_msgs/String)
-face_recognition_node
-  ↓ face_identities (std_msgs/String)
-gaze_analysis_node
-  ↓ gaze_status (std_msgs/String)
-engagement_manager_node
-  ↓ face_event, gaze_event (std_msgs/String)
+📹 Camera → 👤 Detection → 🔍 Recognition → 👁️ Gaze → 📢 Events
 ```
 
-## 依存関係
+## 🚀 クイックスタート
+
+### 1. インストール
+
+詳細は [INSTALLATION.md](INSTALLATION.md) を参照してください。
 
 ```bash
-# Python依存関係
+# 依存関係インストール
 pip install face_recognition opencv-python numpy
-
-# ROS2依存関係
 sudo apt install ros-humble-cv-bridge ros-humble-sensor-msgs
-```
 
-## ビルド方法
-
-```bash
+# ビルド
 cd ~/ros2_ws
 colcon build --packages-select susumu_face_engagement_detector
 source install/setup.bash
 ```
 
-## 使用方法
-
-### 1. 全ノード同時起動（推奨）
+### 2. 起動
 
 ```bash
-# 通常の複数プロセス起動
+# 全ノード起動
 ros2 launch susumu_face_engagement_detector simple_launch.py
 
-# 1プロセス内で効率的起動（ComposableNode使用）
-ros2 launch susumu_face_engagement_detector multi_node_launch.py
-```
-
-### 2. 個別ノード起動
-
-```bash
-# 顔検出ノード
-ros2 run susumu_face_engagement_detector face_detection_node
-
-# 顔認識ノード
-ros2 run susumu_face_engagement_detector face_recognition_node
-
-# 注視判定ノード
-ros2 run susumu_face_engagement_detector gaze_analysis_node
-
-# 管理ノード
-ros2 run susumu_face_engagement_detector engagement_manager_node
-```
-
-### 3. 元の統合ノード起動
-
-```bash
-ros2 run susumu_face_engagement_detector face_engagement_node
-```
-
-### 4. モニタリングツール
-
-システムの動作状況をリアルタイムで監視できるCLIモニタリングツールが含まれています。
-
-```bash
-# 基本モニタリング
+# モニタリング
 ros2 run susumu_face_engagement_detector monitoring_node
-
-# ランチファイル使用（推奨）
-ros2 launch susumu_face_engagement_detector monitoring.launch.py
-
-# カスタム設定
-ros2 launch susumu_face_engagement_detector monitoring.launch.py refresh_rate:=0.5 show_content:=false log_to_file:=true
-
-# 異なる画像トピックを使用
-ros2 launch susumu_face_engagement_detector monitoring.launch.py image_topic:=/image
 ```
 
-#### モニタリング機能
-- **ノード状態監視**: 各ノードのアクティブ/非アクティブ状態
-- **トピック統計**: メッセージ数、Hz、サイズ、最終受信時刻
-- **パフォーマンス統計**: 入力レート、出力レート、処理効率
-- **データフロー表示**: パイプライン全体の可視化
-- **メッセージ内容プレビュー**: 最新メッセージの内容確認
+### 3. 動作確認・テスト
 
-#### モニタリングパラメータ
-- `refresh_rate`: 画面更新間隔（秒、デフォルト: 1.0）
-- `show_content`: メッセージ内容表示（デフォルト: true）
-- `log_to_file`: ログファイル出力（デフォルト: false）
-- `image_topic`: 入力画像トピック名（デフォルト: /camera/color/image_raw）
-
-## パラメータ設定
-
-### face_detection_node
-- `image_topic`: 入力画像トピック名 (デフォルト: `/camera/color/image_raw`)
-- `detection_model`: 顔検出モデル `hog` or `cnn` (デフォルト: `hog`)
-
-### face_recognition_node
-- `known_faces_dir`: 既知の顔画像ディレクトリ (デフォルト: `known_faces`)
-- `match_tolerance`: 顔認識の閾値 (デフォルト: `0.6`)
-
-### gaze_analysis_node
-- `gaze_threshold_px`: 注視判定の閾値（ピクセル） (デフォルト: `50`)
-- `gaze_duration`: 注視判定の持続時間（秒） (デフォルト: `2.0`)
-
-### engagement_manager_node
-- `face_timeout`: 顔喪失のタイムアウト（秒） (デフォルト: `1.0`)
-
-## 出力メッセージ
-
-### face_event
-- `{face_id}:DETECTED` - 顔検出
-- `{face_id}:LOST` - 顔喪失
-
-### gaze_event
-- `{face_id}:ENGAGED` - 注視開始
-- `{face_id}:DISENGAGED` - 注視終了
-
-## 既知の顔画像設定
+システムの動作確認には疑似カメラが使用できます：
 
 ```bash
-mkdir known_faces
-# 既知の人物の顔画像を known_faces/ ディレクトリに配置
-# ファイル名がface_idとして使用されます
+# 疑似カメラでのテスト
+python susumu_face_engagement_detector/test_camera_node.py
+
+# 包括的検証
+python scripts/test_pipeline.py
 ```
 
-## トピック監視例
+詳細は [TESTING.md](TESTING.md) を参照してください。
 
+## 📚 ドキュメント
+
+| ドキュメント | 内容 |
+|---|---|
+| [INSTALLATION.md](INSTALLATION.md) | 依存関係とビルド方法 |
+| [USAGE.md](USAGE.md) | 起動方法とパラメータ設定 |
+| [API.md](API.md) | トピック仕様とメッセージフォーマット |
+| [TESTING.md](TESTING.md) | 動作検証とテスト方法 |
+| [TEST_RESULTS.md](TEST_RESULTS.md) | 包括的検証結果 |
+
+## 💡 特徴
+
+### 🔧 モジュラー設計
+- 各機能を独立したノードに分割
+- ComposableNodeによる効率的な実行
+- パイプライン処理による高スループット
+
+### 📊 リアルタイム監視
+- CLIベースの包括的監視ツール
+- ノード状態、トピック統計、パフォーマンス指標
+- 視覚的なデータフロー表示
+
+### 🧪 包括的テスト
+- 疑似カメラによる自動検証
+- 著作権フリーの合成テスト画像
+- 7パターンの検証シナリオ
+
+### ⚙️ 柔軟な設定
+- パラメータによるカスタマイズ
+- 複数の起動方法
+- 用途に応じた最適化設定
+
+## 📊 出力例
+
+### イベント出力
 ```bash
-# 顔イベント監視
+# 顔イベント
 ros2 topic echo /face_event
+# → user_1:DETECTED
+# → user_1:LOST
 
-# 注視イベント監視
+# 注視イベント  
 ros2 topic echo /gaze_event
-
-# 内部データ監視
-ros2 topic echo /face_detections
-ros2 topic echo /face_identities
-ros2 topic echo /gaze_status
+# → user_1:ENGAGED
+# → user_1:DISENGAGED
 ```
 
-## 動作仕様
+### モニタリング画面
+```
+📊 Node Status:
+  face_detection    🟢 ACTIVE
+  face_recognition  🟢 ACTIVE
+  gaze_analysis     🟢 ACTIVE
+  engagement_manager🟢 ACTIVE
 
-1. **顔検出**: カメラ画像から顔を検出し、顔特徴量を生成
-2. **顔認識**: 
-   - 既知の顔画像と一致すれば優先的に識別
-   - 過去に検出した顔と一致すれば追跡
-   - 新規の場合は新しいIDを割り当て
-3. **注視判定**: 顔がカメラ中央を向いて2秒経過で注視状態と判定
-4. **イベント発行**: 顔検出/喪失、注視開始/終了時にイベントを発行
+📡 Topic Status:
+  /face_detections     ✅ 15 msgs, 3.2 Hz
+  /face_identities     ✅ 12 msgs, 2.8 Hz
+  /gaze_status         ✅ 15 msgs, 3.2 Hz
+  /face_event          ✅ 3 msgs, 0.5 Hz
+```
 
-## 効率化のポイント
+## 🎮 使用例
 
-- **モジュール分離**: 各処理を独立したノードに分割
-- **ComposableNode**: 1プロセス内で複数ノードを実行可能
-- **パイプライン処理**: 顔検出→認識→注視判定の流れを効率化
-- **パラメータ調整**: 用途に応じて閾値や設定を調整可能
+### 基本使用
+```bash
+# システム起動
+ros2 launch susumu_face_engagement_detector simple_launch.py
+
+# 別ターミナルでモニタリング
+ros2 run susumu_face_engagement_detector monitoring_node
+```
+
+### カスタム設定
+```bash
+# 高速処理設定
+ros2 launch susumu_face_engagement_detector simple_launch.py \
+  detection_model:=hog gaze_threshold_px:=30
+
+# 高精度設定
+ros2 launch susumu_face_engagement_detector simple_launch.py \
+  detection_model:=cnn match_tolerance:=0.5
+```
+
+### テスト・検証
+```bash
+# 動的顔生成テスト
+python susumu_face_engagement_detector/test_camera_node.py --ros-args -p fps:=5.0
+
+# 複数顔画像テスト
+python susumu_face_engagement_detector/test_camera_node.py --ros-args \
+  -p test_mode:=file -p image_file:=test_images/multiple_faces_test.jpg
+
+# パイプライン検証
+python scripts/test_pipeline.py
+```
+
+## 🤝 開発情報
+
+このプロジェクトは[Claude Code](https://claude.ai/code)によって開発されています。
+
+### 開発履歴
+- **2025年6月29日**: 初期実装・マルチノードアーキテクチャ
+- **2025年6月30日**: 監視ツール・包括的テストシステム実装
+
+### 貢献方法
+1. Issueを作成して問題や改善提案を報告
+2. Pull Requestで機能追加や修正を提案
+3. テスト結果や使用例を共有
+
+## 📄 ライセンス
+
+Apache License 2.0
+
+---
+
+詳細な使用方法は各ドキュメントを参照してください。質問や問題がある場合は、Issueを作成してお知らせください。
