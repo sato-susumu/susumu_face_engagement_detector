@@ -102,12 +102,31 @@ class FaceEngagementMonitor(Node):
             # コールバック関数作成
             callback = self.create_callback(topic_name)
             
-            # 購読作成
+            # 購読作成（QoS設定を調整）
+            from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+            
+            # 画像トピック用の設定
+            if msg_type == Image:
+                qos_profile = QoSProfile(
+                    reliability=ReliabilityPolicy.BEST_EFFORT,
+                    history=HistoryPolicy.KEEP_LAST,
+                    depth=1,
+                    durability=DurabilityPolicy.VOLATILE
+                )
+            else:
+                # その他のトピック用の設定
+                qos_profile = QoSProfile(
+                    reliability=ReliabilityPolicy.RELIABLE,
+                    history=HistoryPolicy.KEEP_LAST,
+                    depth=10,
+                    durability=DurabilityPolicy.VOLATILE
+                )
+            
             subscription = self.create_subscription(
                 msg_type,
                 topic_name,
                 callback,
-                10
+                qos_profile
             )
             self.topic_subscriptions[topic_name] = subscription
             
@@ -149,8 +168,29 @@ class FaceEngagementMonitor(Node):
         print("\n📊 Node Status:")
         print("-" * 40)
         
-        # 各ノードの推定状態
-        nodes_status = {
+        # 実際のノード存在チェック
+        try:
+            # ROS2のAPIを使ってノード一覧を取得
+            node_names_and_namespaces = self.get_node_names_and_namespaces()
+            node_names = [name for name, namespace in node_names_and_namespaces]
+            
+            actual_nodes = {
+                'face_detection': 'face_detection_node' in node_names,
+                'face_recognition': 'face_recognition_node' in node_names,
+                'gaze_analysis': 'gaze_analysis_node' in node_names,
+                'engagement_manager': 'engagement_manager_node' in node_names
+            }
+        except Exception as e:
+            self.get_logger().debug(f'Failed to get node names: {e}')
+            actual_nodes = {
+                'face_detection': False,
+                'face_recognition': False,
+                'gaze_analysis': False,
+                'engagement_manager': False
+            }
+        
+        # メッセージ受信による状態判定
+        message_status = {
             'face_detection': self.monitors['/face_detections'].message_count > 0,
             'face_recognition': self.monitors['/face_identities'].message_count > 0,
             'gaze_analysis': self.monitors['/gaze_status'].message_count > 0,
@@ -158,9 +198,27 @@ class FaceEngagementMonitor(Node):
                                  self.monitors['/gaze_event'].message_count > 0)
         }
         
-        for node_name, is_active in nodes_status.items():
-            status = "🟢 ACTIVE" if is_active else "🔴 INACTIVE"
+        for node_name in actual_nodes.keys():
+            node_exists = actual_nodes[node_name]
+            has_messages = message_status[node_name]
+            
+            if node_exists and has_messages:
+                status = "🟢 ACTIVE"
+            elif node_exists and not has_messages:
+                status = "🟡 RUNNING (no messages)"
+            else:
+                status = "🔴 INACTIVE"
+                
             print(f"  {node_name:20} {status}")
+        
+        # デバッグ情報：検出されたノード一覧を表示
+        try:
+            node_names_and_namespaces = self.get_node_names_and_namespaces()
+            detected_nodes = [name for name, namespace in node_names_and_namespaces if 'face' in name or 'gaze' in name or 'engagement' in name]
+            if detected_nodes:
+                print(f"\n  🔍 Detected face/gaze nodes: {', '.join(detected_nodes)}")
+        except Exception as e:
+            print(f"\n  ⚠️ Node detection error: {str(e)[:50]}...")
     
     def display_topic_status(self):
         print("\n📡 Topic Status:")
