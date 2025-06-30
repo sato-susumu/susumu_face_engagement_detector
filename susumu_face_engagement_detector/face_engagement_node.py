@@ -95,15 +95,18 @@ class FaceEngagementNode(Node):
             threshold_px=self.declare_parameter('gaze_threshold_px', 50).value,
             duration=self.declare_parameter('gaze_duration', 2.0).value
         )
-        topic = self.declare_parameter('image_topic', '/image').value
+        topic = self.get_parameter('image_topic').value
         self.create_subscription(Image, topic, self._on_image, qos_profile=10)
         self._face_pub = self.create_publisher(String, 'face_event', qos_profile=10)
         self._gaze_pub = self.create_publisher(String, 'gaze_event', qos_profile=10)
         self._last_seen: Dict[str, float] = {}
+        
+        self.get_logger().info(f'Face Engagement Node started - Input topic: {topic}')
+        self.get_logger().info('Face Engagement Node - Output topics: /face_event, /gaze_event')
 
     def _declare_params(self) -> None:
         for name, default in [
-            ('image_topic', '/image'),
+            ('image_topic', '/camera/color/image_raw'),
             ('known_faces_dir', 'known_faces'),
             ('detection_model', 'hog'),
             ('match_tolerance', 0.6),

@@ -9,7 +9,7 @@ def generate_launch_description():
             executable='face_detection_node',
             name='face_detection_node',
             parameters=[{
-                'image_topic': '/image',
+                'image_topic': '/camera/color/image_raw',
                 'detection_model': 'hog'
             }],
             output='screen'

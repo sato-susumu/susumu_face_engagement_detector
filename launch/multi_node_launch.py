@@ -15,7 +15,7 @@ def generate_launch_description():
                 plugin='susumu_face_engagement_detector.FaceDetectionNode',
                 name='face_detection_node',
                 parameters=[{
-                    'image_topic': '/image',
+                    'image_topic': '/camera/color/image_raw',
                     'detection_model': 'hog'
                 }]
             ),
