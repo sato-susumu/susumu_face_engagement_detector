@@ -45,6 +45,9 @@ class GazeAnalysisNode(Node):
         
         self.create_subscription(String, 'face_identities', self._on_face_identity, qos_profile=10)
         self._gaze_status_pub = self.create_publisher(String, 'gaze_status', qos_profile=10)
+        
+        self.get_logger().info('Gaze Analysis Node started - Input topic: /face_identities')
+        self.get_logger().info('Gaze Analysis Node - Output topic: /gaze_status')
 
     def _declare_params(self) -> None:
         for name, default in [

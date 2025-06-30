@@ -14,6 +14,9 @@ class EngagementManagerNode(Node):
         self._face_event_pub = self.create_publisher(String, 'face_event', qos_profile=10)
         self._gaze_event_pub = self.create_publisher(String, 'gaze_event', qos_profile=10)
         
+        self.get_logger().info('Engagement Manager Node started - Input topic: /gaze_status')
+        self.get_logger().info('Engagement Manager Node - Output topics: /face_event, /gaze_event')
+        
         self._active_faces: Set[str] = set()
         self._last_seen: Dict[str, float] = {}
         self._engagement_state: Dict[str, bool] = {}

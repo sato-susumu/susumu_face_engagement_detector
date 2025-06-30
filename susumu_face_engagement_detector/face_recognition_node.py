@@ -53,6 +53,9 @@ class FaceRecognitionNode(Node):
         
         self.create_subscription(String, 'face_detections', self._on_face_detection, qos_profile=10)
         self._face_identity_pub = self.create_publisher(String, 'face_identities', qos_profile=10)
+        
+        self.get_logger().info('Face Recognition Node started - Input topic: /face_detections')
+        self.get_logger().info('Face Recognition Node - Output topic: /face_identities')
 
     def _declare_params(self) -> None:
         for name, default in [

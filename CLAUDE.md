@@ -63,6 +63,18 @@ ros2 launch susumu_face_engagement_detector engagement_manager_only.launch.py
 ros2 run susumu_face_engagement_detector face_engagement_node
 ```
 
+### モニタリングツール起動
+```bash
+# 基本モニタリング
+ros2 run susumu_face_engagement_detector monitoring_node
+
+# ランチファイル使用（推奨）
+ros2 launch susumu_face_engagement_detector monitoring.launch.py
+
+# カスタム設定
+ros2 launch susumu_face_engagement_detector monitoring.launch.py refresh_rate:=0.5 show_content:=false log_to_file:=true
+```
+
 ## テスト実行
 
 ```bash
@@ -85,7 +97,7 @@ pytest test/test_face_detection_node.py
 ## トピック構成
 
 ```
-/image → face_detection_node → face_detections
+/camera/color/image_raw → face_detection_node → face_detections
               ↓
 face_recognition_node → face_identities
               ↓
@@ -111,7 +123,7 @@ engagement_manager_node → face_event, gaze_event
 - **gaze_event**: `face_id:ENGAGED|DISENGAGED`
 
 ### パラメータ
-- `image_topic`: 入力画像トピック名 (デフォルト: `/image`)
+- `image_topic`: 入力画像トピック名 (デフォルト: `/camera/color/image_raw`)
 - `detection_model`: 顔検出モデル `hog`/`cnn` (デフォルト: `hog`)
 - `known_faces_dir`: 既知の顔画像ディレクトリ (デフォルト: `known_faces`)
 - `match_tolerance`: 顔認識の閾値 (デフォルト: `0.6`)
@@ -152,6 +164,16 @@ engagement_manager_node → face_event, gaze_event
    ```bash
    mkdir known_faces
    # 既知の人物の顔画像を配置
+   ```
+
+4. **モニタリング画面が表示されない**
+   ```bash
+   # ターミナルサイズを確認
+   stty size
+   
+   # 他のプロセスがトピックを使用していないか確認
+   ros2 topic list
+   ros2 node list
    ```
 
 ## Git管理
