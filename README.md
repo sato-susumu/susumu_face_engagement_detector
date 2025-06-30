@@ -18,7 +18,7 @@
 
 ### トピック構成
 ```
-/image (sensor_msgs/Image) → face_detection_node
+/camera/color/image_raw (sensor_msgs/Image) → face_detection_node
   ↓ face_detections (std_msgs/String)
 face_recognition_node
   ↓ face_identities (std_msgs/String)
@@ -80,10 +80,37 @@ ros2 run susumu_face_engagement_detector engagement_manager_node
 ros2 run susumu_face_engagement_detector face_engagement_node
 ```
 
+### 4. モニタリングツール
+
+システムの動作状況をリアルタイムで監視できるCLIモニタリングツールが含まれています。
+
+```bash
+# 基本モニタリング
+ros2 run susumu_face_engagement_detector monitoring_node
+
+# ランチファイル使用（推奨）
+ros2 launch susumu_face_engagement_detector monitoring.launch.py
+
+# カスタム設定
+ros2 launch susumu_face_engagement_detector monitoring.launch.py refresh_rate:=0.5 show_content:=false log_to_file:=true
+```
+
+#### モニタリング機能
+- **ノード状態監視**: 各ノードのアクティブ/非アクティブ状態
+- **トピック統計**: メッセージ数、Hz、サイズ、最終受信時刻
+- **パフォーマンス統計**: 入力レート、出力レート、処理効率
+- **データフロー表示**: パイプライン全体の可視化
+- **メッセージ内容プレビュー**: 最新メッセージの内容確認
+
+#### モニタリングパラメータ
+- `refresh_rate`: 画面更新間隔（秒、デフォルト: 1.0）
+- `show_content`: メッセージ内容表示（デフォルト: true）
+- `log_to_file`: ログファイル出力（デフォルト: false）
+
 ## パラメータ設定
 
 ### face_detection_node
-- `image_topic`: 入力画像トピック名 (デフォルト: `/image`)
+- `image_topic`: 入力画像トピック名 (デフォルト: `/camera/color/image_raw`)
 - `detection_model`: 顔検出モデル `hog` or `cnn` (デフォルト: `hog`)
 
 ### face_recognition_node
