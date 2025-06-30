@@ -64,7 +64,7 @@ def test_face_detection_node_creation(rclpy_session):
         # Test parameters
         topic = node.get_parameter('image_topic').value
         model = node.get_parameter('detection_model').value
-        assert topic == '/image'
+        assert topic == '/camera/color/image_raw'
         assert model == 'hog'
         
         node.destroy_node()

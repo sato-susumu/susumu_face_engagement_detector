@@ -5,9 +5,11 @@ import rclpy
 @pytest.fixture(scope="session", autouse=True)
 def rclpy_session():
     """Session-wide ROS2 initialization and cleanup"""
-    rclpy.init()
+    if not rclpy.ok():
+        rclpy.init()
     yield
-    rclpy.shutdown()
+    if rclpy.ok():
+        rclpy.shutdown()
 
 
 @pytest.fixture
