@@ -1,15 +1,25 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
+    # 起動引数定義
+    image_topic_arg = DeclareLaunchArgument(
+        'image_topic',
+        default_value='/camera/color/image_raw',
+        description='Input image topic name'
+    )
+    
     return LaunchDescription([
+        image_topic_arg,
         Node(
             package='susumu_face_engagement_detector',
             executable='face_detection_node',
             name='face_detection_node',
             parameters=[{
-                'image_topic': '/camera/color/image_raw',
+                'image_topic': LaunchConfiguration('image_topic'),
                 'detection_model': 'hog'
             }],
             output='screen'

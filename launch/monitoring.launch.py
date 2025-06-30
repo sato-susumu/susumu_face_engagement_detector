@@ -30,6 +30,12 @@ def generate_launch_description():
         description='Enable logging to file'
     )
     
+    image_topic_arg = DeclareLaunchArgument(
+        'image_topic',
+        default_value='/camera/color/image_raw',
+        description='Input image topic name'
+    )
+    
     # モニタリングノード
     monitoring_node = Node(
         package='susumu_face_engagement_detector',
@@ -40,6 +46,7 @@ def generate_launch_description():
             'refresh_rate': LaunchConfiguration('refresh_rate'),
             'show_content': LaunchConfiguration('show_content'),
             'log_to_file': LaunchConfiguration('log_to_file'),
+            'image_topic': LaunchConfiguration('image_topic'),
         }],
         emulate_tty=True,
     )
@@ -48,5 +55,6 @@ def generate_launch_description():
         refresh_rate_arg,
         show_content_arg, 
         log_to_file_arg,
+        image_topic_arg,
         monitoring_node,
     ])

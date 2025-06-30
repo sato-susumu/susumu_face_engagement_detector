@@ -1,9 +1,17 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node, ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
+    # 起動引数定義
+    image_topic_arg = DeclareLaunchArgument(
+        'image_topic',
+        default_value='/camera/color/image_raw',
+        description='Input image topic name'
+    )
     container = ComposableNodeContainer(
         name='face_engagement_container',
         namespace='',
@@ -15,7 +23,7 @@ def generate_launch_description():
                 plugin='susumu_face_engagement_detector.FaceDetectionNode',
                 name='face_detection_node',
                 parameters=[{
-                    'image_topic': '/camera/color/image_raw',
+                    'image_topic': LaunchConfiguration('image_topic'),
                     'detection_model': 'hog'
                 }]
             ),
@@ -49,4 +57,7 @@ def generate_launch_description():
         output='screen'
     )
 
-    return LaunchDescription([container])
+    return LaunchDescription([
+        image_topic_arg,
+        container
+    ])

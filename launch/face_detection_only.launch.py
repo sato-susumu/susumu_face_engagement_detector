@@ -17,11 +17,20 @@ def generate_launch_description():
             description='Path to config file'
         ),
         
+        DeclareLaunchArgument(
+            'image_topic',
+            default_value='/camera/color/image_raw',
+            description='Input image topic name'
+        ),
+        
         Node(
             package='susumu_face_engagement_detector',
             executable='face_detection_node',
             name='face_detection_node',
-            parameters=[LaunchConfiguration('config_file')],
+            parameters=[
+                LaunchConfiguration('config_file'),
+                {'image_topic': LaunchConfiguration('image_topic')}
+            ],
             output='screen'
         )
     ])
