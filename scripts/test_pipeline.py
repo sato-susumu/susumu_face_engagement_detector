@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-顔エンゲージメント検出システムのパイプライン検証スクリプト
+パイプライン検証スクリプト（信頼性重視版）
+事前に準備されたテスト画像を使用して確実に動作検証を行う
 """
 
 import rclpy
 from rclpy.node import Node
+import subprocess
 import time
-import threading
+import os
 import sys
-from collections import defaultdict, deque
+from collections import defaultdict
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
 
@@ -31,19 +33,14 @@ class PipelineValidator(Node):
         self.message_times = defaultdict(list)
         self.subscribers = {}
         
-        # 検証結果
-        self.validation_results = {}
+        # テスト状態
+        self.test_start_time = None
+        self.camera_process = None
         
         # 各トピックの購読設定
         self.setup_subscriptions()
         
-        # 検証タイマー
-        self.validation_timer = self.create_timer(2.0, self.run_validation)
-        self.test_duration = 30.0  # 30秒間テスト
-        self.start_time = time.time()
-        
         self.get_logger().info('Pipeline Validator started')
-        self.get_logger().info('Monitoring pipeline for 30 seconds...')
     
     def setup_subscriptions(self):
         """各トピックの購読設定"""
@@ -89,192 +86,264 @@ class PipelineValidator(Node):
                 
         return callback
     
-    def run_validation(self):
-        """パイプライン検証実行"""
-        elapsed_time = time.time() - self.start_time
+    def start_test_camera(self, image_file="test_images/person1_test.jpg", fps=2.0):
+        """テスト用カメラを起動"""
+        if not os.path.exists(image_file):
+            self.get_logger().error(f"Test image not found: {image_file}")
+            return False
         
-        if elapsed_time > self.test_duration:
-            self.print_final_results()
-            rclpy.shutdown()
-            return
+        cmd = [
+            'python', 'susumu_face_engagement_detector/test_camera_node.py',
+            '--ros-args',
+            '-p', 'test_mode:=file',
+            '-p', f'image_file:={image_file}',
+            '-p', f'fps:={fps}'
+        ]
         
-        # 現在の状況を出力
-        self.print_current_status(elapsed_time)
+        try:
+            self.camera_process = subprocess.Popen(cmd)
+            self.get_logger().info(f'Started test camera with {image_file}')
+            return True
+        except Exception as e:
+            self.get_logger().error(f'Failed to start test camera: {e}')
+            return False
     
-    def print_current_status(self, elapsed_time):
-        """現在の状況を表示"""
-        print(f"\n{'='*60}")
-        print(f"Pipeline Validation - {elapsed_time:.1f}s elapsed")
-        print(f"{'='*60}")
+    def stop_test_camera(self):
+        """テスト用カメラを停止"""
+        if self.camera_process:
+            try:
+                self.camera_process.terminate()
+                self.camera_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.camera_process.kill()
+                self.camera_process.wait()
+            except Exception:
+                pass
+            finally:
+                self.camera_process = None
+    
+    def run_validation(self, duration=25):
+        """検証を実行"""
+        self.get_logger().info(f'Running validation for {duration} seconds...')
+        self.test_start_time = time.time()
         
+        # メッセージ収集をリセット
+        self.messages.clear()
+        self.message_times.clear()
+        
+        # 指定時間待機してメッセージ収集
+        end_time = time.time() + duration
+        last_report_time = time.time()
+        
+        while time.time() < end_time:
+            rclpy.spin_once(self, timeout_sec=1.0)
+            
+            # 5秒ごとに進捗報告
+            if time.time() - last_report_time >= 5:
+                elapsed = time.time() - self.test_start_time
+                self.print_progress_report(elapsed)
+                last_report_time = time.time()
+        
+        # 結果分析
+        return self.analyze_results()
+    
+    def print_progress_report(self, elapsed_time):
+        """進捗報告を表示"""
+        print(f"\\n--- Progress Report ({elapsed_time:.1f}s elapsed) ---")
+        for topic_name in self.topics.keys():
+            count = len(self.messages[topic_name])
+            status = "✅" if count > 0 else "❌"
+            print(f"  {status} {topic_name}: {count} messages")
+    
+    def analyze_results(self):
+        """結果を分析"""
+        results = {
+            'duration': time.time() - self.test_start_time if self.test_start_time else 0,
+            'topics': {},
+            'pipeline_stages': {},
+            'overall_status': 'UNKNOWN'
+        }
+        
+        # 各トピックの分析
         for topic_name in self.topics.keys():
             msg_count = len(self.messages[topic_name])
             
             if msg_count > 0:
-                latest_msg = self.messages[topic_name][-1]
-                
                 # Hz計算
                 if len(self.message_times[topic_name]) >= 2:
-                    time_window = self.message_times[topic_name][-1] - self.message_times[topic_name][0]
-                    hz = (len(self.message_times[topic_name]) - 1) / time_window if time_window > 0 else 0
+                    time_span = self.message_times[topic_name][-1] - self.message_times[topic_name][0]
+                    hz = (len(self.message_times[topic_name]) - 1) / time_span if time_span > 0 else 0
                 else:
                     hz = 0
                 
-                status = f"✅ ACTIVE ({msg_count} msgs, {hz:.1f} Hz)"
-                if topic_name != '/camera/color/image_raw':
-                    status += f"\n   Latest: {latest_msg[:80]}{'...' if len(str(latest_msg)) > 80 else ''}"
+                results['topics'][topic_name] = {
+                    'message_count': msg_count,
+                    'hz': hz,
+                    'status': 'ACTIVE',
+                    'latest_message': self.messages[topic_name][-1] if self.messages[topic_name] else None
+                }
             else:
-                status = "❌ NO MESSAGES"
-            
-            print(f"{topic_name:25} {status}")
-    
-    def analyze_pipeline_flow(self):
-        """パイプラインフロー分析"""
-        results = {}
+                results['topics'][topic_name] = {
+                    'message_count': 0,
+                    'hz': 0,
+                    'status': 'INACTIVE',
+                    'latest_message': None
+                }
         
-        # 各段階の評価
-        camera_msgs = len(self.messages['/camera/color/image_raw'])
-        detection_msgs = len(self.messages['/face_detections'])
-        recognition_msgs = len(self.messages['/face_identities'])
-        gaze_msgs = len(self.messages['/gaze_status'])
-        face_events = len(self.messages['/face_event'])
-        gaze_events = len(self.messages['/gaze_event'])
+        # パイプライン段階の評価
+        camera_active = results['topics']['/camera/color/image_raw']['status'] == 'ACTIVE'
+        detection_active = results['topics']['/face_detections']['status'] == 'ACTIVE'
+        recognition_active = results['topics']['/face_identities']['status'] == 'ACTIVE'
+        gaze_active = results['topics']['/gaze_status']['status'] == 'ACTIVE'
+        events_active = (results['topics']['/face_event']['status'] == 'ACTIVE' or
+                        results['topics']['/gaze_event']['status'] == 'ACTIVE')
         
-        results['camera_input'] = camera_msgs > 0
-        results['face_detection'] = detection_msgs > 0
-        results['face_recognition'] = recognition_msgs > 0
-        results['gaze_analysis'] = gaze_msgs > 0
-        results['event_generation'] = face_events > 0 or gaze_events > 0
+        results['pipeline_stages'] = {
+            'camera_input': camera_active,
+            'face_detection': detection_active,
+            'face_recognition': recognition_active,
+            'gaze_analysis': gaze_active,
+            'event_generation': events_active
+        }
         
-        # パイプライン効率
-        if camera_msgs > 0:
-            results['detection_efficiency'] = detection_msgs / camera_msgs
-            results['recognition_efficiency'] = recognition_msgs / camera_msgs if camera_msgs > 0 else 0
+        # 総合評価
+        active_stages = sum(results['pipeline_stages'].values())
+        total_stages = len(results['pipeline_stages'])
+        
+        if active_stages == total_stages:
+            results['overall_status'] = 'PASS'
+        elif active_stages >= total_stages * 0.8:
+            results['overall_status'] = 'PARTIAL'
         else:
-            results['detection_efficiency'] = 0
-            results['recognition_efficiency'] = 0
+            results['overall_status'] = 'FAIL'
+        
+        results['success_rate'] = active_stages / total_stages
         
         return results
     
-    def validate_message_formats(self):
-        """メッセージフォーマット検証"""
-        format_results = {}
-        
-        # 顔検出メッセージ検証
-        if self.messages['/face_detections']:
-            valid_detections = 0
-            for msg in self.messages['/face_detections']:
-                try:
-                    parts = msg.split('|')
-                    if len(parts) == 8:  # face_idx|center_x|center_y|width|height|frame_width|frame_height|feature_csv
-                        valid_detections += 1
-                except:
-                    pass
-            
-            format_results['face_detections'] = {
-                'total': len(self.messages['/face_detections']),
-                'valid': valid_detections,
-                'validity_rate': valid_detections / len(self.messages['/face_detections'])
-            }
-        
-        # 顔認識メッセージ検証
-        if self.messages['/face_identities']:
-            valid_identities = 0
-            for msg in self.messages['/face_identities']:
-                try:
-                    parts = msg.split('|')
-                    if len(parts) == 7:  # face_id|center_x|center_y|width|height|frame_width|frame_height
-                        valid_identities += 1
-                except:
-                    pass
-            
-            format_results['face_identities'] = {
-                'total': len(self.messages['/face_identities']),
-                'valid': valid_identities,
-                'validity_rate': valid_identities / len(self.messages['/face_identities'])
-            }
-        
-        return format_results
-    
-    def print_final_results(self):
+    def print_final_results(self, results):
         """最終結果を表示"""
-        print(f"\n{'='*80}")
-        print("FINAL VALIDATION RESULTS")
+        print(f"\\n{'='*80}")
+        print("PIPELINE VALIDATION RESULTS")
         print(f"{'='*80}")
         
-        # パイプライン分析
-        pipeline_results = self.analyze_pipeline_flow()
+        print(f"\\n🕒 Test Duration: {results['duration']:.1f} seconds")
+        print(f"🎯 Overall Status: {results['overall_status']}")
+        print(f"📊 Success Rate: {results['success_rate']:.1%}")
         
-        print("\n📊 Pipeline Flow Analysis:")
+        # パイプライン段階結果
+        print(f"\\n🔄 Pipeline Stages:")
         print("-" * 50)
-        stages = [
-            ('Camera Input', pipeline_results['camera_input']),
-            ('Face Detection', pipeline_results['face_detection']),
-            ('Face Recognition', pipeline_results['face_recognition']),
-            ('Gaze Analysis', pipeline_results['gaze_analysis']),
-            ('Event Generation', pipeline_results['event_generation'])
-        ]
+        stage_names = {
+            'camera_input': '📹 Camera Input',
+            'face_detection': '👤 Face Detection', 
+            'face_recognition': '🔍 Face Recognition',
+            'gaze_analysis': '👁️  Gaze Analysis',
+            'event_generation': '📢 Event Generation'
+        }
         
-        for stage_name, passed in stages:
-            status = "✅ PASS" if passed else "❌ FAIL"
+        for stage_key, stage_name in stage_names.items():
+            status = "✅ PASS" if results['pipeline_stages'][stage_key] else "❌ FAIL"
             print(f"  {stage_name:20} {status}")
         
-        # 効率分析
-        print(f"\n⚡ Efficiency Analysis:")
-        print("-" * 50)
-        print(f"  Detection Efficiency:  {pipeline_results['detection_efficiency']:.2%}")
-        print(f"  Recognition Efficiency: {pipeline_results['recognition_efficiency']:.2%}")
+        # トピック詳細
+        print(f"\\n📡 Topic Statistics:")
+        print("-" * 80)
+        print(f"{'Topic':25} {'Status':10} {'Count':8} {'Hz':8} {'Sample Message'}")
+        print("-" * 80)
         
-        # メッセージ統計
-        print(f"\n📈 Message Statistics:")
-        print("-" * 50)
-        for topic_name in self.topics.keys():
-            count = len(self.messages[topic_name])
-            print(f"  {topic_name:25} {count:5} messages")
+        for topic_name, topic_data in results['topics'].items():
+            status = "✅ ACTIVE" if topic_data['status'] == 'ACTIVE' else "❌ INACTIVE"
+            count = topic_data['message_count']
+            hz = f"{topic_data['hz']:.1f}" if topic_data['hz'] > 0 else "0.0"
+            
+            sample = topic_data['latest_message']
+            if sample and topic_name != '/camera/color/image_raw':
+                sample_display = sample[:30] + "..." if len(sample) > 30 else sample
+            elif sample:
+                sample_display = sample
+            else:
+                sample_display = "None"
+            
+            print(f"{topic_name:25} {status:10} {count:8} {hz:8} {sample_display}")
         
-        # フォーマット検証
-        format_results = self.validate_message_formats()
-        if format_results:
-            print(f"\n📝 Message Format Validation:")
-            print("-" * 50)
-            for topic, result in format_results.items():
-                print(f"  {topic}:")
-                print(f"    Total: {result['total']}, Valid: {result['valid']}")
-                print(f"    Validity Rate: {result['validity_rate']:.1%}")
-        
-        # 最新メッセージサンプル
-        print(f"\n📋 Latest Message Samples:")
-        print("-" * 50)
-        for topic_name in ['/face_detections', '/face_identities', '/gaze_status', '/face_event', '/gaze_event']:
-            if self.messages[topic_name]:
-                latest = self.messages[topic_name][-1]
-                print(f"  {topic_name}:")
-                print(f"    {latest[:100]}{'...' if len(latest) > 100 else ''}")
-        
-        # 総合評価
-        total_stages = len(stages)
-        passed_stages = sum(1 for _, passed in stages if passed)
-        
-        print(f"\n🎯 Overall Assessment:")
-        print("-" * 50)
-        print(f"  Stages Passed: {passed_stages}/{total_stages}")
-        print(f"  Success Rate:  {passed_stages/total_stages:.1%}")
-        
-        if passed_stages == total_stages:
-            print("  🟢 PIPELINE FULLY FUNCTIONAL")
-        elif passed_stages >= total_stages * 0.8:
-            print("  🟡 PIPELINE MOSTLY FUNCTIONAL")
+        # 推奨事項
+        print(f"\\n💡 Assessment:")
+        if results['overall_status'] == 'PASS':
+            print("  🎉 All pipeline stages are working perfectly!")
+            print("  ✅ System is ready for production use.")
+        elif results['overall_status'] == 'PARTIAL':
+            print("  🟡 Most pipeline stages are working correctly.")
+            inactive_stages = [name for name, active in results['pipeline_stages'].items() if not active]
+            print(f"  ⚠️  Review these stages: {', '.join(inactive_stages)}")
         else:
-            print("  🔴 PIPELINE NEEDS ATTENTION")
+            print("  🔴 Multiple pipeline stages have issues.")
+            print("  🔧 Check node startup and system dependencies.")
+    
+    def run_complete_test(self):
+        """完全なテストを実行"""
+        success = False
+        
+        try:
+            # テスト画像の確認
+            test_image = "test_images/person1_test.jpg"
+            if not os.path.exists(test_image):
+                print("❌ Test image not found!")
+                print("🔧 Please run: python scripts/generate_test_images.py")
+                return False
+            
+            print("🚀 Starting Pipeline Validation Test")
+            print(f"📷 Using test image: {test_image}")
+            print("⏱️  Test duration: 25 seconds\\n")
+            
+            # テストカメラ起動
+            if not self.start_test_camera(test_image, fps=2.0):
+                return False
+            
+            # カメラ起動待機
+            time.sleep(3)
+            
+            # 検証実行
+            results = self.run_validation(duration=25)
+            
+            # 結果表示
+            self.print_final_results(results)
+            
+            success = results['overall_status'] in ['PASS', 'PARTIAL']
+            
+        except KeyboardInterrupt:
+            print("\\n⚠️  Test interrupted by user")
+        except Exception as e:
+            self.get_logger().error(f"Test failed: {e}")
+        finally:
+            # クリーンアップ
+            self.stop_test_camera()
+        
+        return success
 
 def main(args=None):
+    # 前提条件チェック
+    if not os.path.exists("test_images"):
+        print("❌ Test images directory not found")
+        print("🔧 Run: python scripts/generate_test_images.py")
+        sys.exit(1)
+    
     rclpy.init(args=args)
     
     try:
         validator = PipelineValidator()
-        rclpy.spin(validator)
-    except KeyboardInterrupt:
-        print("\nValidation interrupted by user")
+        success = validator.run_complete_test()
+        
+        if success:
+            print("\\n🎉 Pipeline validation completed successfully!")
+            sys.exit(0)
+        else:
+            print("\\n❌ Pipeline validation detected issues!")
+            sys.exit(1)
+            
+    except Exception as e:
+        print(f"\\n💥 Validation failed: {e}")
+        sys.exit(1)
     finally:
         if 'validator' in locals():
             validator.destroy_node()

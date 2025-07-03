@@ -80,7 +80,6 @@ python scripts/test_pipeline.py
 | [USAGE.md](USAGE.md) | 起動方法とパラメータ設定 |
 | [API.md](API.md) | トピック仕様とメッセージフォーマット |
 | [TESTING.md](TESTING.md) | 動作検証とテスト方法 |
-| [TEST_RESULTS.md](TEST_RESULTS.md) | 包括的検証結果 |
 
 ## 💡 特徴
 
@@ -93,6 +92,12 @@ python scripts/test_pipeline.py
 - CLIベースの包括的監視ツール
 - ノード状態、トピック統計、パフォーマンス指標
 - 視覚的なデータフロー表示
+
+### 🎯 RViz可視化
+- 顔検出結果のリアルタイム3D表示
+- 複数人の顔を色分けして同時表示
+- 顔認識結果の視覚的確認（既知・未知・ユーザー別）
+- アノテーション付き画像の表示
 
 ### 🧪 包括的テスト
 - 疑似カメラによる自動検証
@@ -156,6 +161,18 @@ ros2 launch susumu_face_engagement_detector simple_launch.py \
   detection_model:=cnn match_tolerance:=0.5
 ```
 
+### RViz可視化
+```bash
+# 顔検出システム起動（RViz可視化対応）
+ros2 launch susumu_face_engagement_detector face_detection_with_rviz.launch.py
+
+# 別ターミナルでRViz起動（GUI環境の場合）
+rviz2 -d config/face_detection_rviz.rviz
+
+# 可視化トピック確認
+ros2 topic list | grep -E "(face_detection|identity|markers)"
+```
+
 ### テスト・検証
 ```bash
 # 動的顔生成テスト
@@ -169,23 +186,10 @@ python susumu_face_engagement_detector/test_camera_node.py --ros-args \
 python scripts/test_pipeline.py
 ```
 
-## 🤝 開発情報
-
-このプロジェクトは[Claude Code](https://claude.ai/code)によって開発されています。
-
-### 開発履歴
-- **2025年6月29日**: 初期実装・マルチノードアーキテクチャ
-- **2025年6月30日**: 監視ツール・包括的テストシステム実装
-
-### 貢献方法
-1. Issueを作成して問題や改善提案を報告
-2. Pull Requestで機能追加や修正を提案
-3. テスト結果や使用例を共有
-
 ## 📄 ライセンス
 
 Apache License 2.0
 
 ---
 
-詳細な使用方法は各ドキュメントを参照してください。質問や問題がある場合は、Issueを作成してお知らせください。
+詳細な使用方法は各ドキュメントを参照してください。

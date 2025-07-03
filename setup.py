@@ -15,7 +15,7 @@ setup(
         (os.path.join('share', package_name, 'launch'),
             glob('launch/*.py')),
         (os.path.join('share', package_name, 'config'),
-            glob('config/*.yaml')),
+            glob('config/*.yaml') + glob('config/*.rviz')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -33,6 +33,7 @@ setup(
             'face_engagement_node = susumu_face_engagement_detector.face_engagement_node:main',
             'monitoring_node = susumu_face_engagement_detector.monitoring_node:main',
             'test_camera_node = susumu_face_engagement_detector.test_camera_node:main',
+            'multi_node_executor = susumu_face_engagement_detector.multi_node_executor:main',
         ],
     },
 )
