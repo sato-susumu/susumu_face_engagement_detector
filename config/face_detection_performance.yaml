@@ -1,0 +1,17 @@
+# Face Detection Performance Configuration
+# CPU負荷軽減のための設定例
+
+face_detection_node:
+  ros__parameters:
+    # 基本設定
+    image_topic: '/camera/color/image_raw'
+    detection_model: 'hog'  # 'hog' (高速) または 'cnn' (高精度)
+    
+    # CPU負荷軽減設定
+    max_fps: 5.0               # 最大処理FPS (0=制限なし)
+    downsample_factor: 0.5     # 画像縮小率 (1.0=原寸, 0.5=50%縮小)
+    
+    # 設定例:
+    # - 高性能モード: max_fps=0, downsample_factor=1.0
+    # - バランスモード: max_fps=10.0, downsample_factor=0.7
+    # - 省電力モード: max_fps=3.0, downsample_factor=0.5
