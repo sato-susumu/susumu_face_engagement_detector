@@ -1,0 +1,8 @@
+# Outputs are generated artifacts — don't commit them by default.
+# README.md is the only tracked file here.
+*
+!.gitignore
+!README.md
+!*/
+*/*
+!*/.gitkeep
