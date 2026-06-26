@@ -1,195 +1,287 @@
 # Susumu Face Engagement Detector
 
-⚠️ **開発中のプロジェクトです** ⚠️
+カメラ映像から **顔検出 → 認識 → 頭部姿勢 → 視線方向 → 表情 → エンゲージメント** までを ROS 2 (Humble) で行うパッケージです。
 
-このプロジェクトは現在開発中です。機能の追加や変更が頻繁に行われる可能性があります。
+出力は [ROS4HRI / REP-155](https://github.com/ros-infrastructure/rep/blob/master/rep-0155.rst) と [vision_msgs](https://github.com/ros-perception/vision_msgs) の標準メッセージに準拠。すべての評価結果と図は [`outputs/`](outputs/) 配下に自動集約され、`make outputs` で再現可能です。
 
 ---
 
-顔検出・認識・注視判定を行うROS2パッケージです。効率的な動作のため、複数のノードに分割して実装されています。
+## ハイライト
 
-## 🎯 概要
+| | dlib HOG (v0) | **YuNet (v1)** | 改善 |
+|---|---:|---:|---:|
+| 顔検出 AP@0.5 (WIDER FACE val 3,226枚) | 13.70% | **58.79%** | **×4.3** |
+| 検出レイテンシ (mean / p95) | 232.6 / 406.8 ms | **23.4 / 63.9 ms** | **×10** |
+| 認識 1:1 (LFW pairs test) | **98.50%** acc, AUC 0.9974, 4.1 ms / pair (dlib 128-D) |||
+| ライセンス | コード Boost SL / 重みパブリックドメイン | **Apache 2.0** (商用可) ||
 
-このシステムは以下の機能を提供します：
+![detection backend comparison](outputs/figures/detection/backend_comparison.png)
 
-- **👤 顔検出**: カメラ画像からリアルタイムで顔を検出
-- **🔍 顔認識**: 既知の人物の識別と新規人物の追跡
-- **👁️ 注視分析**: カメラに向けた注視状態の判定
-- **📢 イベント通知**: 顔の出現・消失、注視開始・終了の通知
-- **📊 リアルタイム監視**: システム全体の動作状況監視
+完全な数値レポート (図入り) → [`outputs/reports/REPORT.md`](outputs/reports/REPORT.md)
 
-## 🏗️ アーキテクチャ
+---
 
-### ノード構成
-- **face_detection_node**: 画像から顔を検出し、顔特徴量を生成
-- **face_recognition_node**: 顔特徴量から人物を識別
-- **gaze_analysis_node**: 顔の位置から注視状態を判定
-- **engagement_manager_node**: 全体の状態管理とイベント発行
+## アーキテクチャ
 
-### データフロー
 ```
-📹 Camera → 👤 Detection → 🔍 Recognition → 👁️ Gaze → 📢 Events
+camera/color/image_raw
+    │
+    ├─→ face_detection_node ─── vision_msgs/Detection2DArray
+    │      backend: dlib_hog | dlib_cnn | yunet
+    │
+    ├─→ face_recognition_node ─ hri_msgs/IdsList
+    │      backend: dlib_128d
+    │
+    ├─→ head_pose_node ──────── geometry_msgs/PoseStamped
+    │      backend: mediapipe_pnp
+    │
+    ├─→ gaze_node ───────────── geometry_msgs/Vector3Stamped
+    │      backend: mediapipe_iris
+    │
+    ├─→ expression_node ─────── hri_msgs/Expression
+    │      backend: hsemotion (Apache 2.0)
+    │
+    └─→ engagement_node ─────── hri_msgs/EngagementLevel  (5値 + EMA + ヒステリシス)
+           Altuwairqi Concentration Index
 ```
 
-## 🚀 クイックスタート
+詳細な変革経緯と設計判断: [`docs/REVAMP_PLAN.md`](docs/REVAMP_PLAN.md)
 
-### 1. インストール
+---
 
-詳細は [INSTALLATION.md](INSTALLATION.md) を参照してください。
+## クイックスタート
+
+### 1. 依存関係
 
 ```bash
-# 依存関係インストール
-pip install face_recognition opencv-python numpy
-sudo apt install ros-humble-cv-bridge ros-humble-sensor-msgs
+sudo apt install \
+    ros-humble-cv-bridge \
+    ros-humble-vision-msgs \
+    ros-humble-hri-msgs \
+    ros-humble-rosbag2-storage-mcap
 
-# ビルド
+pip3 install --user mediapipe hsemotion-onnx face_recognition opencv-contrib-python
+```
+
+### 2. モデル重みの取得 (どちらも Apache 2.0)
+
+```bash
+# YuNet 顔検出
+mkdir -p ~/models/face_detection
+wget https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx \
+    -O ~/models/face_detection/face_detection_yunet_2023mar.onnx
+
+# HSEmotion 表情 (urllib バグ回避のため事前取得)
+mkdir -p ~/.hsemotion
+wget https://github.com/HSE-asavchenko/face-emotion-recognition/raw/main/models/affectnet_emotions/onnx/enet_b0_8_best_afew.onnx \
+    -O ~/.hsemotion/enet_b0_8_best_afew.onnx
+```
+
+### 3. ビルド
+
+```bash
 cd ~/ros2_ws
 colcon build --packages-select susumu_face_engagement_detector
 source install/setup.bash
 ```
 
-### 2. 起動
+### 4. 起動
 
 ```bash
-# 全ノード起動
-ros2 launch susumu_face_engagement_detector simple_launch.py
+# フルパイプライン (YuNet + head_pose + gaze + expression + engagement)
+ros2 launch susumu_face_engagement_detector engagement_pipeline.launch.py
 
-# モニタリング
-ros2 run susumu_face_engagement_detector monitoring_node
+# トピック確認
+ros2 topic echo /humans/persons/default/engagement_status
+ros2 topic echo /humans/persons/default/engagement_score
 ```
 
-### 3. 動作確認・テスト
-
-システムの動作確認には疑似カメラが使用できます：
+個別ノード起動例:
 
 ```bash
-# 疑似カメラでのテスト
-python susumu_face_engagement_detector/test_camera_node.py
+ros2 run susumu_face_engagement_detector face_detection_node \
+    --ros-args -p detection_backend:=yunet \
+               -p model_path:=$HOME/models/face_detection/face_detection_yunet_2023mar.onnx
 
-# 包括的検証
-python scripts/test_pipeline.py
+ros2 run susumu_face_engagement_detector head_pose_node
+ros2 run susumu_face_engagement_detector gaze_node
+ros2 run susumu_face_engagement_detector expression_node
+ros2 run susumu_face_engagement_detector engagement_node
 ```
-
-詳細は [TESTING.md](TESTING.md) を参照してください。
-
-## 📚 ドキュメント
-
-| ドキュメント | 内容 |
-|---|---|
-| [INSTALLATION.md](INSTALLATION.md) | 依存関係とビルド方法 |
-| [USAGE.md](USAGE.md) | 起動方法とパラメータ設定 |
-| [API.md](API.md) | トピック仕様とメッセージフォーマット |
-| [TESTING.md](TESTING.md) | 動作検証とテスト方法 |
-
-## 💡 特徴
-
-### 🔧 モジュラー設計
-- 各機能を独立したノードに分割
-- ComposableNodeによる効率的な実行
-- パイプライン処理による高スループット
-
-### 📊 リアルタイム監視
-- CLIベースの包括的監視ツール
-- ノード状態、トピック統計、パフォーマンス指標
-- 視覚的なデータフロー表示
-
-### 🎯 RViz可視化
-- 顔検出結果のリアルタイム3D表示
-- 複数人の顔を色分けして同時表示
-- 顔認識結果の視覚的確認（既知・未知・ユーザー別）
-- アノテーション付き画像の表示
-
-### 🧪 包括的テスト
-- 疑似カメラによる自動検証
-- 著作権フリーの合成テスト画像
-- 7パターンの検証シナリオ
-
-### ⚙️ 柔軟な設定
-- パラメータによるカスタマイズ
-- 複数の起動方法
-- 用途に応じた最適化設定
-
-## 📊 出力例
-
-### イベント出力
-```bash
-# 顔イベント
-ros2 topic echo /face_event
-# → user_1:DETECTED
-# → user_1:LOST
-
-# 注視イベント  
-ros2 topic echo /gaze_event
-# → user_1:ENGAGED
-# → user_1:DISENGAGED
-```
-
-### モニタリング画面
-```
-📊 Node Status:
-  face_detection    🟢 ACTIVE
-  face_recognition  🟢 ACTIVE
-  gaze_analysis     🟢 ACTIVE
-  engagement_manager🟢 ACTIVE
-
-📡 Topic Status:
-  /face_detections     ✅ 15 msgs, 3.2 Hz
-  /face_identities     ✅ 12 msgs, 2.8 Hz
-  /gaze_status         ✅ 15 msgs, 3.2 Hz
-  /face_event          ✅ 3 msgs, 0.5 Hz
-```
-
-## 🎮 使用例
-
-### 基本使用
-```bash
-# システム起動
-ros2 launch susumu_face_engagement_detector simple_launch.py
-
-# 別ターミナルでモニタリング
-ros2 run susumu_face_engagement_detector monitoring_node
-```
-
-### カスタム設定
-```bash
-# 高速処理設定
-ros2 launch susumu_face_engagement_detector simple_launch.py \
-  detection_model:=hog gaze_threshold_px:=30
-
-# 高精度設定
-ros2 launch susumu_face_engagement_detector simple_launch.py \
-  detection_model:=cnn match_tolerance:=0.5
-```
-
-### RViz可視化
-```bash
-# 顔検出システム起動（RViz可視化対応）
-ros2 launch susumu_face_engagement_detector face_detection_with_rviz.launch.py
-
-# 別ターミナルでRViz起動（GUI環境の場合）
-rviz2 -d config/face_detection_rviz.rviz
-
-# 可視化トピック確認
-ros2 topic list | grep -E "(face_detection|identity|markers)"
-```
-
-### テスト・検証
-```bash
-# 動的顔生成テスト
-python susumu_face_engagement_detector/test_camera_node.py --ros-args -p fps:=5.0
-
-# 複数顔画像テスト
-python susumu_face_engagement_detector/test_camera_node.py --ros-args \
-  -p test_mode:=file -p image_file:=test_images/multiple_faces_test.jpg
-
-# パイプライン検証
-python scripts/test_pipeline.py
-```
-
-## 📄 ライセンス
-
-Apache License 2.0
 
 ---
 
-詳細な使用方法は各ドキュメントを参照してください。
+## 検証・評価・可視化 — すべて `outputs/` に集約
+
+### 一発で全部走る
+
+```bash
+make outputs
+```
+
+これで `outputs/` 配下に baselines (JSON) + figures (PNG) + reports/REPORT.md が揃います。実行内容:
+
+1. dlib HOG smoke (100画像) → `outputs/baselines/v0_dlib_hog_smoke_n100.json`
+2. YuNet full (WIDER FACE val 3,226画像, 約1.5分) → `outputs/baselines/v1_yunet_wider_val.json`
+3. dlib 128-D recognition (LFW pairs 1,000) → `outputs/baselines/v0_dlib_128d_lfw.json`
+4. 3カテゴリの可視化 → `outputs/figures/{detection,recognition,engagement}/`
+5. 図埋め込みレポート → `outputs/reports/REPORT.md`
+
+### 個別実行
+
+```bash
+# 評価
+make eval-detection-baseline    # dlib HOG full WIDER FACE val   (~12 min)
+make eval-detection-smoke       # dlib HOG 100枚                 (~30s)
+make eval-detection-yunet       # YuNet full WIDER FACE val      (~1.5 min)
+make eval-recognition-baseline  # dlib 128-D LFW pairs test      (~30s)
+
+# 可視化
+make visualize-detection        # AP/latency棒グラフ + オーバーレイ画像
+make visualize-recognition      # ROC + コサイン類似度分布
+make visualize-engagement       # 24秒シナリオ engagement 時系列
+
+# レポート (図埋め込み)
+make eval-report
+
+# 全消去 (.gitignore/.gitkeep/README は残す)
+make clean-outputs
+```
+
+### 生成される図
+
+#### 検出 (`outputs/figures/detection/`)
+
+`backend_comparison.png` — backend ごとの AP / latency 棒グラフ:
+
+![backend comparison](outputs/figures/detection/backend_comparison.png)
+
+`overlay_*.png` — WIDER FACE 画像上に各 backend の検出結果を横並びオーバーレイ:
+
+![overlay sample](outputs/figures/detection/overlay_0_Parade_Parade_0_12.png)
+
+#### 認識 (`outputs/figures/recognition/`)
+
+| 種類 | サンプル |
+|---|---|
+| 同人物 / 別人物のコサイン類似度分布 | ![score distribution](outputs/figures/recognition/score_distribution_dlib_128d.png) |
+| 1:1 verification ROC + AUC | ![ROC](outputs/figures/recognition/roc_dlib_128d.png) |
+
+#### エンゲージメント (`outputs/figures/engagement/`)
+
+24 秒の合成シナリオ (UNKNOWN → ENGAGED → DISENGAGED → ENGAGED → DISENGAGING) の時系列:
+
+![engagement timeline](outputs/figures/engagement/engagement_timeline.png)
+
+成果物保存場所の詳細 → [`outputs/README.md`](outputs/README.md)
+評価ハーネスの拡張方法 → [`eval/README.md`](eval/README.md)
+
+---
+
+## メッセージ I/F
+
+### 標準 (推奨)
+
+| トピック | 型 | 出所 |
+|---|---|---|
+| `/face_detections_vision` | `vision_msgs/Detection2DArray` | ros-perception |
+| `/humans/faces/tracked` | `hri_msgs/IdsList` | REP-155 |
+| `/humans/faces/head_pose` | `geometry_msgs/PoseStamped` | 標準 |
+| `/humans/faces/gaze` | `geometry_msgs/Vector3Stamped` | 標準 |
+| `/humans/faces/expression` | `hri_msgs/Expression` | REP-155 |
+| `/humans/persons/<id>/engagement_status` | `hri_msgs/EngagementLevel` (5値) | REP-155 |
+| `/humans/persons/<id>/engagement_score` | `std_msgs/Float32` (連続値) | 補助 |
+
+### 旧 String I/F (後方互換、将来削除予定)
+
+`/face_detections`, `/face_identities` (パイプ区切り `std_msgs/String`)、`/engagement_event` (ENGAGED/DISENGAGED 文字列)。Phase 1 以前の下流ノードへの互換のため残置。新規開発では上記 標準 I/F を使用してください。
+
+---
+
+## エンゲージメント定義
+
+`engagement_node` は Altuwairqi らの Concentration Index に基づくスコアリングを採用:
+
+```
+EmotionWeight = {neutral: 0.9, happy: 0.7, surprise: 0.6, sad: 0.3, ...}
+GazeWeight    = 1.0 (≤15°) | 0.5 (≤30°) | 0.0 (>30°)
+HeadPoseGate  = (|yaw|<15°) AND (|pitch|<10°)  → pass
+
+raw   = EmotionWeight × GazeWeight / max(EmotionWeights)
+filt  = EMA(raw, α=0.3)
+gated = filt if HeadPoseGate else filt × 0.3
+
+EngagementLevel (hri_msgs/EngagementLevel):
+  ≥0.66 持続       → ENGAGED       (3)
+  ≥0.33            → ENGAGING      (2)
+  ENGAGED から低下 → DISENGAGING   (4)
+  <0.10 持続       → DISENGAGED    (1)
+  入力欠落         → UNKNOWN       (0)
+```
+
+すべての閾値・EMA係数・ヒステリシス回数は `engagement_node` の ROS param で調整可能。式の根拠と意思決定経緯は [docs/REVAMP_PLAN.md §2.5](docs/REVAMP_PLAN.md)。
+
+---
+
+## ユースケース別の構成
+
+### 商用 (ライセンス完全クリーン)
+
+すべて Apache 2.0 / MIT / Boost SL の組合せ:
+
+| 機能 | Backend | ライセンス |
+|---|---|---|
+| 検出 | `yunet` | Apache 2.0 (重み含む) |
+| 認識 | `dlib_128d` | Boost SL + パブリックドメイン重み |
+| 頭部姿勢 | `mediapipe_pnp` | Apache 2.0 |
+| 視線 | `mediapipe_iris` | Apache 2.0 |
+| 表情 | `hsemotion` | Apache 2.0 (重み含む) |
+
+### 研究 / 非商用 SOTA
+
+差し替え候補 (重みが研究用のみ):
+
+- 検出: SCRFD-10G (InsightFace) → WIDER Hard AP 83.05%
+- 認識: ArcFace R100 / AdaFace → IJB-C(1e-4) 97%+
+- 視線: L2CS-Net (MIT) → MPIIGaze 3.92° (GPU 推奨)
+
+backend 切替は ROS param のみ — コード変更不要。
+
+---
+
+## テスト
+
+```bash
+make test          # unit + integration
+make test-unit     # 単体のみ
+```
+
+統合テストは subprocess 起動でROS 2状態を隔離します。CI は `.github/workflows/ci.yml` で `setup-ros@v0.7` + `action-ros-ci@v0.4` を経由した自動ビルド・テスト。
+
+---
+
+## ドキュメント
+
+| ドキュメント | 内容 |
+|---|---|
+| [docs/REVAMP_PLAN.md](docs/REVAMP_PLAN.md) | 根本変革計画 (Phase 0–5、技術選定根拠、リスク) |
+| [outputs/README.md](outputs/README.md) | 成果物 (JSON / 図 / レポート) の保存先構成 |
+| [outputs/reports/REPORT.md](outputs/reports/REPORT.md) | 現在のベースライン数値 + 図 |
+| [eval/README.md](eval/README.md) | 評価ハーネス操作手順・拡張方法 |
+
+---
+
+## ライセンス
+
+Apache License 2.0 (本パッケージのコード)。各バックエンドの**重み**ライセンスは個別に確認のこと — 「商用」構成と「研究」構成の区別は上記参照。
+
+---
+
+## 開発履歴
+
+- **Phase 5+**: `outputs/` への成果物集約、可視化 (matplotlib) 自動生成、レポートへの図埋め込み、レガシー一掃 (旧ノード/launch/scripts/docs/test_images すべて削除)
+- **Phase 4**: `engagement_node` 再設計 (Concentration Index + 5値 EngagementLevel)
+- **Phase 3**: `head_pose_node` / `gaze_node` / `expression_node` 新設
+- **Phase 2**: 検出 YuNet 化 (AP 4.3 倍)、`face_recognition_node` IdsList 並行発行
+- **Phase 1**: 評価ハーネス + WIDER FACE / LFW ベースライン取得 + `vision_msgs` 並行発行
+- **Phase 0**: 設計レビュー、3 並列技術調査、`docs/REVAMP_PLAN.md`

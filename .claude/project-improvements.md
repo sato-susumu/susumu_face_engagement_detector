@@ -1,162 +1,148 @@
 # 改善履歴・教訓
 
-## 開発履歴
+Phase 0 から Phase 5+ までの主要な改善と、そこから得られた一般化可能な教訓。
 
-### 2025年6月29日 - 初期開発
-**改善内容:** 統合型ノードから分割アーキテクチャへの変更
+## Phase 0 → Phase 1: 検証可能な状態への移行
 
-**Before:**  
-単一のface_engagement_node.pyで全機能を処理
+### Before
+- 合成 `test_images/` を目視確認
+- 「動く / 動かない」しか語れない
+- 改善の優劣を数値で示せない
 
-**After:**  
-4つの専門ノードによる分散処理
-1. face_detection_node - 顔検出
-2. face_recognition_node - 顔識別  
-3. gaze_analysis_node - 注視判定
-4. engagement_manager_node - 状態管理
+### After
+- WIDER FACE val (3,226 画像) で AP@0.5 を取得
+- LFW pairs で 1:1 verification accuracy 計測
+- 全結果を `outputs/baselines/*.json` に固定スキーマで永続化
+- `make eval-report` で比較表自動生成
 
-**学んだ教訓:**
-- モジュール分離により保守性が大幅向上
-- デバッグが容易になった
-- 個別テストが可能になった
-- パフォーマンス調整が柔軟になった
+### 教訓
+- **「先進化」を主張するなら数値の前後比較が必須** — ベースライン取得を Phase 1 で最優先にしたのは正解
+- 公開ベンチマーク (WIDER FACE / LFW) を使うことで再現性と業界比較性を確保
+- 評価結果の JSON スキーマを早期に固定 → 後段の可視化・レポート・CI 全てがそれに乗れた
 
-## テスト改善
+## Phase 1 → Phase 2: 検出バックエンドの近代化
 
-### unittest → pytest移行
-**問題:** unittestの冗長な記述、モック機能の制限
+### Before
+- dlib HOG: WIDER FACE val AP@0.5 = **13.70%**, latency mean 232.6 ms
 
-**解決策:** pytestの導入
-- 簡潔なテスト記述
-- 優秀なモック機能
-- パラメータ化テスト
-- フィクスチャ活用
+### After
+- YuNet (OpenCV Zoo, Apache 2.0): AP@0.5 = **58.79%**, latency mean 23.4 ms
+- 検出精度 4.3 倍、レイテンシ 10 倍 (log scale 必要なほど)
+- ライセンスもクリーン (Apache 2.0)
 
-**結果:** テストコード量30%削減、カバレッジ向上
+### 教訓
+- **古いライブラリ (face_recognition / dlib HOG) は 2018 年から実質メンテ停止** — 同等以上の代替を採用すべき
+- バックエンドは抽象クラス化 (`backends/detection.py`) しておくと差し替えが ROS param 1 行
+- 「商用 OK」と書ける構成 (Apache 2.0 重み) を選ぶことで採用の幅が広がる
 
-## パフォーマンス改善
+## Phase 2 → Phase 3: モダリティ追加 (姿勢・視線・表情)
 
-### 顔検出最適化
-**問題:** リアルタイム処理でCPU使用率が高い
+### Before
+- 顔位置の中央寄り判定だけで「注視」を近似
+- 表情・頭部姿勢の概念なし
+- engagement は 2 値 (DETECTED / LOST + ENGAGED / DISENGAGED) のみ
 
-**対策:**
-1. 画像サイズを1/4に縮小して処理
-2. HOGモデルをデフォルト使用
-3. フレームスキップ機能追加
+### After
+- `head_pose_node`: MediaPipe + solvePnP で yaw/pitch/roll
+- `gaze_node`: MediaPipe Iris で 3D 視線方向ベクトル
+- `expression_node`: HSEmotion ONNX で 8 感情カテゴリ + softmax 確率
+- すべて CPU リアルタイム動作 (mediapipe / hsemotion)
 
-**効果:** CPU使用率50%削減
+### 教訓
+- **「engagement」の名にふさわしい実装には少なくとも視線 + 表情 + 姿勢が必要**
+- CPU only でも MediaPipe + HSEmotion で十分動く (GPU 不要が判明)
+- GPU 必要なモデル (L2CS-Net 等) は後発の拡張として残せばよい
 
-### メモリ使用量最適化
-**問題:** 長時間動作でメモリリークの懸念
+## Phase 3 → Phase 4: engagement 再定義
 
-**対策:**
-1. 不要な変数の明示的削除
-2. ガベージコレクション強制実行
-3. 画像データの適切な解放
+### Before
+- 「顔が画面中央近くで持続時間 N 秒」 → ENGAGED
+- 視線方向の概念なし、表情の影響なし
 
-**効果:** 長時間動作の安定性向上
+### After
+- Altuwairqi Concentration Index 採用:
+  ```
+  raw  = EmotionWeight × GazeWeight / max(EmotionWeights)
+  filt = EMA(raw, α=0.3)
+  gated = filt × (HeadPoseGate ? 1 : 0.3)
+  ```
+- `hri_msgs/EngagementLevel` 5 値出力 (UNKNOWN/DISENGAGED/ENGAGING/ENGAGED/DISENGAGING)
+- ヒステリシスで状態遷移の flapping 防止
 
-## 設定管理改善
+### 教訓
+- 文献に基づく計算式を採用すると「なぜそのスコア式なのか」を説明しやすい
+- 5 値 + EMA + ヒステリシスは現場のロボット応用で十分な表現力
+- 値域・閾値はすべて ROS param で外部化 → 環境に応じてチューニング可能
 
-### ハードコード値の外部化
-**問題:** 閾値等がコード内に固定
+## Phase 5+: 成果物の集約と可視化
 
-**改善:**
-- パラメータファイル導入
-- 動的パラメータ変更対応
-- ノード別設定分離
+### Before
+- 評価結果 JSON は `eval/baselines/` 直下
+- 可視化は無し (数値表のみ)
+- 古い launch/scripts/docs が混在
 
-**メリット:**
-- 環境に応じた調整が容易
-- 再コンパイル不要
-- 設定の一元管理
+### After
+- 成果物 `outputs/` に一本化 (baselines / figures / reports / runs)
+- `make outputs` 一発で評価 + 可視化 + レポート生成
+- matplotlib で 3 カテゴリ可視化 (detection backend 比較、recognition ROC、engagement 時系列)
+- レポート (`outputs/reports/REPORT.md`) に図埋め込み
+- レガシー (旧ノード/launch/scripts/docs/test_images) すべて削除
 
-## エラーハンドリング強化
+### 教訓
+- **生成物と原本コードを明確に分離** (outputs/ ↔ eval/) するとリポジトリが小さく保てる
+- 「数字 + 図 + 説明文」が揃った Markdown レポートが説得力を最大化
+- レガシーは「将来読みたいかも」で残すと無限に肥大化する — git history に任せて削除
 
-### 例外処理の統一
-**課題:** ノード間でエラー処理が不統一
+## 失敗から学んだこと
 
-**改善策:**
-1. 共通例外処理パターンの確立
-2. ログレベルの統一
-3. エラー復旧機能の追加
+### sys.modules 汚染問題 (Phase 1)
+**失敗:** レガシーテストで `sys.modules['cv2'] = MagicMock()` を実行 → pytest セッション全体に副作用 → 新規 unit テストが謎の MagicMock を受け取る。
 
-**成果:** システムの安定性向上
+**対策:** subprocess 起動でテストを完全隔離 + レガシーテスト本体を削除 (Phase 5+)。
 
-## 今後の改善計画
+**一般化:** モジュール grobal mock は使わない、または使うならテストファイル単位で完全に閉じ込める。
 
-### Phase 1: カスタムメッセージ型導入
-**現状の問題:** String型による型安全性の欠如
+### setup.cfg なしで executable が見つからない (Phase 2)
+**失敗:** `ros2 pkg executables` が空。`ros2 run` も "No executable found"。
 
-**計画:**
-1. 顔検出結果用メッセージ型定義
-2. 顔識別結果用メッセージ型定義
-3. 注視状態用メッセージ型定義
+**対策:** `setup.cfg` で `install_scripts=$base/lib/<pkg>` を明示。
 
-**期待効果:**
-- 型安全性の向上
-- デバッグの容易化
-- パフォーマンス向上
+**一般化:** ament_python パッケージは `setup.cfg` が事実上必須。テンプレートに組み込むべき。
 
-### Phase 2: 複数カメラ対応
-**現状の制限:** 単一カメラのみ対応
+### バックグラウンド実行を長時間ブロックして待つ
+**失敗:** dlib HOG full WIDER FACE val (12分) を `while ps; do sleep 30` で待機 → ユーザーから「何待ってる?」とツッコミ。
 
-**計画:**
-1. カメラID管理機能
-2. 並列処理アーキテクチャ
-3. 統合結果管理
+**対策:** 同じ数値が既に取れているなら再実行不要。バックグラウンドプロセスは目的が明確な時だけ。
 
-### Phase 3: AI機能拡張
-**現在の機能:** 基本的な顔認識・注視判定
+**一般化:** 「動く」「数値を取る」が目的なら一度成功したら次に移る。冗長な再計算は時間の浪費。
 
-**拡張計画:**
-1. 感情認識機能
-2. 年齢・性別推定
-3. 表情変化検出
+### vision_msgs/BoundingBox2D.center のネスト構造
+**失敗:** `bb.center.x = 100.0` → `AttributeError`。`center` は Pose2D で `position.x` にネスト。
 
-## 失敗事例と対策
+**対策:** `bb.center.position.x = float(cx)`。テストで実際に msg を構築・assert する contract test を書いた。
 
-### 失敗例1: 初期のメモリリーク
-**原因:** OpenCV画像オブジェクトの不適切な管理
+**一般化:** 外部 msg 仕様は ソース (.msg ファイル) を必ず参照。`grep -A3 BoundingBox2D /opt/ros/humble/share/.../`.
 
-**学習:** 明示的なリソース解放の重要性
+## 今後の拡張余地
 
-**対策:** 
-```python
-try:
-    frame = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
-    # 処理
-finally:
-    del frame  # 明示的削除
-```
+### 商用構成 → 研究 SOTA への切り替え
+backend abstraction はすでに用意済み。追加すべきは以下のみ:
+- `backends/detection.py` に `SCRFDBackend` (InsightFace, 非商用重み)
+- `backends/recognition.py` に `ArcFaceBackend` / `MagFaceBackend`
+- `backends/headpose.py` に `SixDRepNetBackend` (MIT, GPU)
+- `backends/gaze.py` に `L2CSNetBackend` (MIT, GPU)
 
-### 失敗例2: テストの不安定性
-**原因:** 非同期処理のタイミング問題
+### 多人物対応
+現状 engagement_node は単一人物 (`default`)。`hri_person_manager` 統合で多人物 ID 解決後、`/humans/persons/<id>/...` を各人物分発行する設計に拡張可能。
 
-**学習:** モックの適切な使用法
+### TensorRT / ONNX Runtime GPU
+`onnxruntime-gpu` 入れて backend を ORT 経由にすれば 2-5x 加速。NITROS (Isaac ROS) で intra-process zero-copy も検討候補 (ただし rclpy では zero-copy 未実装、C++ 化が前提)。
 
-**対策:** 
-```python
-with patch('time.sleep'):  # 時間待ちをモック化
-    result = node.process()
-```
+### 評価データセット拡充
+現状未着手:
+- MPIIGaze / Gaze360 (視線推定の定量評価)
+- AFLW2000-3D (頭部姿勢 MAE)
+- AffectNet (表情 confusion matrix) ※要申請
+- DAiSEE (engagement 4階級 accuracy) ※要申請
 
-## ベストプラクティス確立
-
-### コード品質基準
-1. **型ヒント必須** - 全関数にtype hints
-2. **docstring記述** - 公開API全てに説明
-3. **ログ出力統一** - レベル別適切な出力
-4. **例外処理** - 予期せぬエラーへの対応
-
-### テスト品質基準
-1. **カバレッジ80%以上** - 重要な処理は必須
-2. **モック活用** - 外部依存の分離
-3. **統合テスト** - エンドツーエンドの動作確認
-4. **パフォーマンステスト** - 性能劣化の検出
-
-### 運用品質基準
-1. **設定外部化** - 環境依存値の分離
-2. **ログ監視** - 問題の早期発見
-3. **リソース監視** - CPU・メモリ使用量
-4. **バックアップ** - 設定・データの保護
+これらが揃えば Phase 6 として **engagement 全モダリティを公開ベンチマークで定量化** できる。

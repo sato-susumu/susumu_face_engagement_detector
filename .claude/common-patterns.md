@@ -1,273 +1,197 @@
 # 頻用コマンドパターン
 
-## 開発・テスト
+## ビルド・テスト
 
-### ビルド・テスト
 ```bash
-# パッケージビルド
+# 環境セットアップ
+source /opt/ros/humble/setup.bash
+
+# 通常ビルド
+cd ~/ros2_ws
 colcon build --packages-select susumu_face_engagement_detector
-
-# テスト実行
-pytest                              # 全テスト
-pytest -v                         # 詳細出力
-pytest -m "not integration"       # 単体テストのみ
-pytest -m integration             # 統合テストのみ
-pytest test/test_specific.py      # 特定ファイル
-
-# カバレッジ付きテスト
-pytest --cov=susumu_face_engagement_detector --cov-report=html
-
-# 並列テスト実行
-pytest -n auto
-```
-
-### ソース更新
-```bash
-# 環境設定
-source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-# パッケージ再ビルド（開発時）
+# シンボリックリンク install (開発中、setup.py 変更時は再ビルド)
 colcon build --packages-select susumu_face_engagement_detector --symlink-install
+
+# クリーン再ビルド
+rm -rf build/susumu_face_engagement_detector install/susumu_face_engagement_detector
+colcon build --packages-select susumu_face_engagement_detector
 ```
 
-## ROS2操作
+## テスト
 
-### ノード起動
 ```bash
-# 個別ノード起動
+# Makefile 経由 (推奨)
+make test              # 全テスト (unit + integration, 57件)
+make test-unit         # 単体のみ
+
+# 直接 pytest
+python3 -m pytest                          # 全テスト
+python3 -m pytest test/unit -v             # 単体のみ
+python3 -m pytest test/integration -v      # 統合のみ
+python3 -m pytest test/unit/test_engagement_scorer.py -v  # 特定ファイル
+python3 -m pytest -k "yunet"               # 名前で絞り込み
+```
+
+## 評価ハーネス (outputs/ への成果物生成)
+
+```bash
+# 一発で全部 (smoke 検出 + YuNet 検出 + LFW 認識 + 可視化 + レポート)
+make outputs
+
+# 個別評価
+make eval-detection-smoke       # dlib HOG 100枚 (~30秒)
+make eval-detection-baseline    # dlib HOG full WIDER FACE val (~12分)
+make eval-detection-yunet       # YuNet full WIDER FACE val (~1.5分)
+make eval-recognition-baseline  # dlib 128-D LFW pairs test (~30秒)
+
+# 可視化
+make visualize-detection        # AP/latency 棒グラフ + オーバーレイ
+make visualize-recognition      # ROC + コサイン類似度分布
+make visualize-engagement       # 24秒 engagement 時系列
+
+# レポート再生成
+make eval-report                # outputs/reports/REPORT.md
+
+# 全成果物クリア
+make clean-outputs
+```
+
+## ROS 2 起動
+
+### フルパイプライン
+
+```bash
+# YuNet + head_pose + gaze + expression + engagement
+ros2 launch susumu_face_engagement_detector engagement_pipeline.launch.py
+```
+
+### 個別ノード
+
+```bash
+# 検出 (YuNet)
+ros2 run susumu_face_engagement_detector face_detection_node \
+    --ros-args -p detection_backend:=yunet \
+               -p model_path:=$HOME/models/face_detection/face_detection_yunet_2023mar.onnx
+
+# 検出 (dlib HOG fallback)
 ros2 run susumu_face_engagement_detector face_detection_node
+
+# 認識・姿勢・視線・表情・engagement
 ros2 run susumu_face_engagement_detector face_recognition_node
-ros2 run susumu_face_engagement_detector gaze_analysis_node
-ros2 run susumu_face_engagement_detector engagement_manager_node
+ros2 run susumu_face_engagement_detector head_pose_node
+ros2 run susumu_face_engagement_detector gaze_node
+ros2 run susumu_face_engagement_detector expression_node
+ros2 run susumu_face_engagement_detector engagement_node
+```
 
-# ランチファイル使用
-ros2 launch susumu_face_engagement_detector simple_launch.py
-ros2 launch susumu_face_engagement_detector multi_node_launch.py
+### 個別 launch
+
+```bash
 ros2 launch susumu_face_engagement_detector face_detection_only.launch.py
-
-# 元の統合ノード
-ros2 run susumu_face_engagement_detector face_engagement_node
+ros2 launch susumu_face_engagement_detector face_recognition_only.launch.py
+ros2 launch susumu_face_engagement_detector face_detection_rviz.launch.py
 ```
 
-### 監視・デバッグ
+## トピック確認
+
 ```bash
-# 統合モニタリング（推奨）
-ros2 launch susumu_face_engagement_detector monitoring.launch.py
+# 標準 (推奨) ROS4HRI トピック
+ros2 topic echo /face_detections_vision               # vision_msgs/Detection2DArray
+ros2 topic echo /humans/faces/tracked                 # hri_msgs/IdsList
+ros2 topic echo /humans/faces/head_pose               # geometry_msgs/PoseStamped
+ros2 topic echo /humans/faces/gaze                    # geometry_msgs/Vector3Stamped
+ros2 topic echo /humans/faces/expression              # hri_msgs/Expression
+ros2 topic echo /humans/persons/default/engagement_status   # hri_msgs/EngagementLevel
+ros2 topic echo /humans/persons/default/engagement_score    # std_msgs/Float32
 
-# 個別モニタリング
-ros2 run susumu_face_engagement_detector monitoring_node
-
-# カスタムモニタリング
-ros2 launch susumu_face_engagement_detector monitoring.launch.py refresh_rate:=0.5 show_content:=false
-
-# 従来のコマンド
-ros2 node list
-ros2 topic list
-
-# トピック監視
-ros2 topic echo /face_detections
+# 旧 String I/F (後方互換)
+ros2 topic echo /face_detections    # std_msgs/String パイプ区切り
 ros2 topic echo /face_identities
-ros2 topic echo /gaze_status
-ros2 topic echo /face_event
-ros2 topic echo /gaze_event
+ros2 topic echo /engagement_event   # "<person_id>:ENGAGED" 等
 
-# トピック周波数確認
-ros2 topic hz /image
-ros2 topic hz /face_detections
+# 統計
+ros2 topic hz /face_detections_vision
+ros2 topic bw /face_detections_vision
+ros2 topic delay /face_detections_vision
+```
 
-# ノード情報確認
-ros2 node info /face_detection_node
-ros2 node info /face_recognition_node
-ros2 node info /gaze_analysis_node
-ros2 node info /engagement_manager_node
+## パラメータ確認・変更
 
-# パラメータ確認
+```bash
+# 一覧
 ros2 param list /face_detection_node
-ros2 param get /face_detection_node detection_model
-ros2 param set /face_detection_node detection_model cnn
+ros2 param list /engagement_node
+
+# 取得
+ros2 param get /face_detection_node detection_backend
+ros2 param get /engagement_node engaged_threshold
+
+# 設定 (型に注意)
+ros2 param set /face_detection_node downsample_factor 1.0
+ros2 param set /engagement_node engaged_threshold 0.7
 ```
 
-### サービス・アクション
-```bash
-# サービス一覧
-ros2 service list
+## 評価データ取得
 
-# サービス呼び出し
-ros2 service call /service_name service_type "request_data"
+```bash
+# WIDER FACE val (363 MB、HuggingFace ミラー)
+mkdir -p ~/datasets/wider_face && cd ~/datasets/wider_face
+wget https://huggingface.co/datasets/CUHK-CSE/wider_face/resolve/main/data/wider_face_split.zip
+wget https://huggingface.co/datasets/CUHK-CSE/wider_face/resolve/main/data/WIDER_val.zip
+unzip wider_face_split.zip
+unzip WIDER_val.zip
+
+# YuNet 重み (Apache 2.0)
+mkdir -p ~/models/face_detection
+wget https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx \
+    -O ~/models/face_detection/face_detection_yunet_2023mar.onnx
+
+# HSEmotion 重み (Apache 2.0)
+mkdir -p ~/.hsemotion
+wget https://github.com/HSE-asavchenko/face-emotion-recognition/raw/main/models/affectnet_emotions/onnx/enet_b0_8_best_afew.onnx \
+    -O ~/.hsemotion/enet_b0_8_best_afew.onnx
 ```
 
-## システム監視
+## デバッグ
 
-### リソース監視
 ```bash
-# CPU・メモリ使用量
-htop
-top -p $(pgrep -f "face_")
+# ノードグラフ可視化
+rqt_graph
 
-# ROS2プロセス確認
-ps aux | grep ros2
-ps aux | grep face_
+# ロギング閾値変更
+ros2 run susumu_face_engagement_detector face_detection_node --ros-args --log-level debug
 
-# GPU使用量（該当する場合）
-nvidia-smi
+# 特定ノードを冷ます (発行を一時停止)
+ros2 lifecycle set /face_detection_node deactivate    # ※ ライフサイクル非対応の場合は ctrl-C で
+
+# トピック未配信の調査
+ros2 topic info /humans/faces/gaze
+ros2 node info /gaze_node
 ```
 
-### ログ確認
+## rosbag2
+
 ```bash
-# ROS2ログ
-ros2 log list
-ros2 log level /face_detection_node DEBUG
-
-# システムログ
-journalctl -f | grep face_
-tail -f ~/.ros/log/latest/face_detection_node/stdout.log
-```
-
-## トラブルシューティング
-
-### 依存関係問題
-```bash
-# 依存関係確認
-rosdep check --from-paths src --ignore-src -r -y
-
-# 依存関係インストール
-rosdep install --from-paths src --ignore-src -r -y
-
-# Python依存関係
-pip install face_recognition opencv-python numpy
-pip list | grep face_recognition
-```
-
-### 通信問題
-```bash
-# ネットワーク確認
-ros2 doctor
-ros2 daemon stop && ros2 daemon start
-
-# 環境変数確認
-echo $ROS_DOMAIN_ID
-echo $ROS_DISTRO
-env | grep ROS
-```
-
-### パフォーマンス問題
-```bash
-# CPU使用率
-ros2 topic hz /image --window 100
-
-# メモリ使用量
-ros2 node info /face_detection_node | grep -A5 "Memory"
-
-# 計算時間測定
-time ros2 topic echo /face_detections --once
-```
-
-## 設定・カスタマイズ
-
-### パラメータ設定
-```bash
-# 設定確認
-ros2 param get /face_detection_node detection_model
-ros2 param get /face_recognition_node match_tolerance
-ros2 param get /gaze_analysis_node gaze_threshold_px
-
-# 設定変更
-ros2 param set /face_detection_node detection_model cnn
-ros2 param set /face_recognition_node match_tolerance 0.5
-ros2 param set /gaze_analysis_node gaze_threshold_px 30
-
-# 設定保存
-ros2 param dump /face_detection_node --output-dir config/
-```
-
-### カスタマイズ起動
-```bash
-# カスタムパラメータで起動
-ros2 run susumu_face_engagement_detector face_detection_node --ros-args -p detection_model:=cnn
-
-# パラメータファイル指定
-ros2 launch susumu_face_engagement_detector simple_launch.py params_file:=config/custom_params.yaml
-
-# 名前空間指定
-ros2 run susumu_face_engagement_detector face_detection_node --ros-args -r __ns:=/robot1
-```
-
-## 開発効率化
-
-### よく使うエイリアス
-```bash
-# .bashrcに追加推奨
-alias build_face='colcon build --packages-select susumu_face_engagement_detector'
-alias test_face='pytest -v'
-alias run_face='ros2 launch susumu_face_engagement_detector simple_launch.py'
-alias monitor_face='ros2 launch susumu_face_engagement_detector monitoring.launch.py'
-alias monitor_simple='ros2 run susumu_face_engagement_detector monitoring_node'
-```
-
-### 環境切り替え
-```bash
-# 開発環境
-export ROS_DOMAIN_ID=0
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-
-# テスト環境
-export ROS_DOMAIN_ID=1
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-```
-
-## データ収集・分析
-
-### ログ収集
-```bash
-# 全ログ収集
-ros2 bag record -a -o face_engagement_data
-
-# 特定トピックのみ
-ros2 bag record /image /face_detections /face_identities -o face_detection_data
+# 録画
+ros2 bag record -s mcap /camera/color/image_raw -o /tmp/session.bag
 
 # 再生
-ros2 bag play face_engagement_data
+ros2 bag play /tmp/session.bag
+
+# 評価用に画像列を bag 化 (eval/rosbag_converters/)
+python3 -m eval.rosbag_converters.images_to_rosbag \
+    --wider-val-root ~/datasets/wider_face \
+    --output /tmp/wider_val.bag \
+    --fps 5.0 \
+    --limit 100
 ```
 
-### パフォーマンス分析
+## 整理・クリーンアップ
+
 ```bash
-# 処理時間測定
-ros2 run demo_nodes_cpp listener --ros-args --log-level DEBUG
-
-# 統計情報取得
-ros2 topic bw /face_detections    # 帯域幅
-ros2 topic delay /face_detections # 遅延時間
-```
-
-## Git操作
-
-### 一般的なワークフロー
-```bash
-# 現在の状態確認
-git status
-git log --oneline -10
-
-# 変更のコミット
-git add .
-git commit -m "feat: add new face detection feature"
-
-# プッシュ
-git push origin main
-
-# ブランチ操作
-git checkout -b feature/new-detection
-git merge main
-```
-
-### 緊急時対応
-```bash
-# 変更の取り消し
-git checkout -- filename
-git reset HEAD filename
-
-# 強制リセット（注意）
-git reset --hard HEAD~1
+make clean-outputs           # outputs/ の生成物のみ削除 (README/.gitkeep/.gitignore は残す)
+find . -name __pycache__ -exec rm -rf {} +  # Python キャッシュ
+rm -rf build install log     # ROS 2 ビルド成果物
 ```
