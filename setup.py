@@ -28,12 +28,10 @@ setup(
         'console_scripts': [
             'face_detection_node = susumu_face_engagement_detector.face_detection_node:main',
             'face_recognition_node = susumu_face_engagement_detector.face_recognition_node:main',
-            'gaze_analysis_node = susumu_face_engagement_detector.gaze_analysis_node:main',
-            'engagement_manager_node = susumu_face_engagement_detector.engagement_manager_node:main',
-            'face_engagement_node = susumu_face_engagement_detector.face_engagement_node:main',
-            'monitoring_node = susumu_face_engagement_detector.monitoring_node:main',
-            'test_camera_node = susumu_face_engagement_detector.test_camera_node:main',
-            'multi_node_executor = susumu_face_engagement_detector.multi_node_executor:main',
+            'head_pose_node = susumu_face_engagement_detector.head_pose_node:main',
+            'gaze_node = susumu_face_engagement_detector.gaze_node:main',
+            'expression_node = susumu_face_engagement_detector.expression_node:main',
+            'engagement_node = susumu_face_engagement_detector.engagement_node:main',
         ],
     },
 )
