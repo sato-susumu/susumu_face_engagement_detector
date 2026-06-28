@@ -294,38 +294,38 @@ def cmd_engagement(args: argparse.Namespace) -> int:
 
     # Scripted scenario:
     #   0–4s : no detection (UNKNOWN)
-    #   4–10s: engaged signals — neutral + camera-aligned gaze
-    #   10–14s: distracted — gaze 40° off, yaw 30°
+    #   4–10s: engaged signals — neutral + centered head
+    #   10–14s: distracted — yaw 30°
     #   14–20s: re-engaged — neutral again
-    #   20–24s: bored — sad emotion, gaze drifting
+    #   20–24s: bored — sad emotion
     ticks_per_sec = 10
     total_s = 24
     times = []
     scores = []
     levels = []
     raw_emotion = []
-    raw_gaze = []
     raw_yaw = []
+    raw_pitch = []
 
     for tick in range(total_s * ticks_per_sec):
         t = tick / ticks_per_sec
         if t < 4:
-            inp = EngagementInputs(None, None, None, None)
+            inp = EngagementInputs(None, None, None)
         elif t < 10:
-            inp = EngagementInputs("neutral", 5.0, 0.0, 0.0)
+            inp = EngagementInputs("neutral", 0.0, 0.0)
         elif t < 14:
-            inp = EngagementInputs("neutral", 40.0, 30.0, 0.0)
+            inp = EngagementInputs("neutral", 30.0, 0.0)
         elif t < 20:
-            inp = EngagementInputs("neutral", 5.0, 0.0, 0.0)
+            inp = EngagementInputs("neutral", 0.0, 0.0)
         else:
-            inp = EngagementInputs("sad", 25.0, 0.0, 0.0)
+            inp = EngagementInputs("sad", 0.0, 0.0)
         st = scorer.update(inp)
         times.append(t)
         scores.append(st.score)
         levels.append(st.level)
         raw_emotion.append(inp.emotion_label or "")
-        raw_gaze.append(inp.gaze_angle_deg)
         raw_yaw.append(inp.yaw_deg)
+        raw_pitch.append(inp.pitch_deg)
 
     fig, (ax_score, ax_state, ax_input) = plt.subplots(
         3, 1, figsize=(11, 9), sharex=True,
@@ -366,13 +366,15 @@ def cmd_engagement(args: argparse.Namespace) -> int:
     ax_state.legend(handles=handles, loc="upper right", ncol=len(handles), fontsize=9)
     ax_state.set_title("State (5-level EngagementLevel)")
 
-    # Inputs panel — gaze angle + yaw
-    ax_input.plot(times, [g if g is not None else np.nan for g in raw_gaze],
-                  label="gaze angle from +Z (°)", color="#4C72B0")
+    # Inputs panel — head pose
     ax_input.plot(times, [y if y is not None else np.nan for y in raw_yaw],
                   label="head yaw (°)", color="#DD8452")
-    ax_input.axhline(cfg.gaze_full_deg, color="#4C72B0", linestyle=":", lw=1)
+    ax_input.plot(times, [p if p is not None else np.nan for p in raw_pitch],
+                  label="head pitch (°)", color="#4C72B0")
     ax_input.axhline(cfg.yaw_gate_deg, color="#DD8452", linestyle=":", lw=1)
+    ax_input.axhline(-cfg.yaw_gate_deg, color="#DD8452", linestyle=":", lw=1)
+    ax_input.axhline(cfg.pitch_gate_deg, color="#4C72B0", linestyle=":", lw=1)
+    ax_input.axhline(-cfg.pitch_gate_deg, color="#4C72B0", linestyle=":", lw=1)
     ax_input.set_xlabel("Time (s)")
     ax_input.set_ylabel("Angle (°)")
     ax_input.set_title("Driving inputs (emotion label shown in subtitle)")
@@ -382,7 +384,7 @@ def cmd_engagement(args: argparse.Namespace) -> int:
     # Phase annotations
     phases = [(0, 4, "UNKNOWN\n(no input)"),
               (4, 10, "engaged signals"),
-              (10, 14, "distracted\n(yaw, off-axis gaze)"),
+              (10, 14, "distracted\n(yaw off-axis)"),
               (14, 20, "re-engaged"),
               (20, 24, "bored\n(sad emotion)")]
     for (a, b, label) in phases:

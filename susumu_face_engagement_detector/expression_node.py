@@ -64,7 +64,7 @@ class ExpressionNode(Node):
         det_backend = self.get_parameter('detection_backend').value or 'dlib_hog'
         det_kwargs = {
             'model_path': self.get_parameter('detection_model_path').value or None,
-            'score_threshold': 0.5,
+            'score_threshold': float(self.get_parameter('score_threshold').value),
             'nms_threshold': 0.3,
         }
         try:
@@ -102,6 +102,7 @@ class ExpressionNode(Node):
             ('expression_backend', 'hsemotion'),
             ('detection_backend', 'dlib_hog'),
             ('detection_model_path', ''),
+            ('score_threshold', 0.8),
         ]:
             self.declare_parameter(name, default)
 

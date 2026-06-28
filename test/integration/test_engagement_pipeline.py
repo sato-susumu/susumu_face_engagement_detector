@@ -1,7 +1,7 @@
 """End-to-end test of the new engagement pipeline.
 
 Spawns engagement_node + a harness that feeds synthetic
-expression / gaze / head_pose messages and verifies the engagement_status
+expression / head_pose messages and verifies the engagement_status
 topic publishes a non-UNKNOWN level.
 
 Runs in a subprocess to avoid the legacy cv2/cv_bridge mock pollution.
@@ -30,7 +30,7 @@ HARNESS_SCRIPT = textwrap.dedent("""\
     import time
 
     import rclpy
-    from geometry_msgs.msg import PoseStamped, Vector3, Vector3Stamped
+    from geometry_msgs.msg import PoseStamped
     from rclpy.executors import SingleThreadedExecutor
     from rclpy.node import Node
     from hri_msgs.msg import EngagementLevel, Expression
@@ -42,7 +42,6 @@ HARNESS_SCRIPT = textwrap.dedent("""\
         def __init__(self):
             super().__init__('engagement_driver')
             self.expr_pub = self.create_publisher(Expression, '/humans/faces/expression', 10)
-            self.gaze_pub = self.create_publisher(Vector3Stamped, '/humans/faces/gaze', 10)
             self.pose_pub = self.create_publisher(PoseStamped, '/humans/faces/head_pose', 10)
             self.received_levels = []
             self.create_subscription(
@@ -58,12 +57,6 @@ HARNESS_SCRIPT = textwrap.dedent("""\
             expr.expression = 'neutral'  # maximum-weight emotion
             expr.confidence = 0.9
             self.expr_pub.publish(expr)
-
-            g = Vector3Stamped()
-            g.header.stamp = self.get_clock().now().to_msg()
-            g.header.frame_id = 'camera_color_optical_frame'
-            g.vector = Vector3(x=0.0, y=0.0, z=1.0)  # straight at camera
-            self.gaze_pub.publish(g)
 
             p = PoseStamped()
             p.header.stamp = self.get_clock().now().to_msg()
@@ -95,7 +88,8 @@ HARNESS_SCRIPT = textwrap.dedent("""\
             end = time.time() + 5.0
             while time.time() < end:
                 driver.publish_engaged_signals()
-                ex.spin_once(timeout_sec=0.05)
+                for _ in range(3):
+                    ex.spin_once(timeout_sec=0.02)
 
             result = {
                 'received_count': len(driver.received_levels),
@@ -120,6 +114,8 @@ def test_engagement_node_reaches_engaged_with_strong_signals(tmp_path: Path) -> 
     cmd = ["bash", "-c", f"source {ROS_SETUP} && python3 {script}"]
     env = dict(os.environ)
     env.setdefault("ROS_DOMAIN_ID", str((os.getpid() + 17) % 100 + 50))
+    repo_root = Path(__file__).resolve().parents[2]
+    env["PYTHONPATH"] = str(repo_root) + os.pathsep + env.get("PYTHONPATH", "")
 
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
     payload = None

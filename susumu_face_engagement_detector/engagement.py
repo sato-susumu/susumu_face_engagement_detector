@@ -1,12 +1,11 @@
-"""Engagement scoring (Concentration Index) — pure Python, framework-free.
+"""Engagement scoring — pure Python, framework-free.
 
-Implements an Altuwairqi-style Concentration Index combining:
+Combines:
 
   * emotion weight (per canonical label, see EMOTION_WEIGHTS)
-  * gaze weight   (1.0 within `gaze_full_deg`, 0.5 within `gaze_half_deg`, else 0)
   * head pose gate (yaw within ±yaw_gate_deg AND pitch within ±pitch_gate_deg)
 
-Raw score r = emotion_weight × gaze_weight / max(EMOTION_WEIGHTS.values())
+Raw score r = emotion_weight / max(EMOTION_WEIGHTS.values())
 filtered = EMA(r, α)
 gated    = filtered if head-pose gate passes else filtered * gate_penalty
 
@@ -52,9 +51,6 @@ def state_name(level: int) -> str:
 
 @dataclass
 class EngagementConfig:
-    # Gaze classification — how aligned with camera the gaze must be.
-    gaze_full_deg: float = 15.0
-    gaze_half_deg: float = 30.0
     # Head pose gate — if either axis exceeds the limit, scale down.
     yaw_gate_deg: float = 15.0
     pitch_gate_deg: float = 10.0
@@ -84,7 +80,6 @@ class EngagementState:
 class EngagementInputs:
     """Per-update measurements feeding the scorer."""
     emotion_label: Optional[str] = None
-    gaze_angle_deg: Optional[float] = None  # angle between gaze and +Z (camera axis)
     yaw_deg: Optional[float] = None
     pitch_deg: Optional[float] = None
 
@@ -99,22 +94,12 @@ class EngagementScorer:
     def update(self, inputs: EngagementInputs) -> EngagementState:
         cfg = self.config
         # Missing modalities → keep score at 0 and don't change state direction.
-        if inputs.emotion_label is None or inputs.gaze_angle_deg is None:
+        if inputs.emotion_label is None:
             return self.state
 
         # Emotion weight (normalised by max)
         max_w = max(EMOTION_WEIGHTS.values())
-        ew = EMOTION_WEIGHTS.get(inputs.emotion_label, 0.5) / max_w
-
-        # Gaze weight
-        if inputs.gaze_angle_deg <= cfg.gaze_full_deg:
-            gw = 1.0
-        elif inputs.gaze_angle_deg <= cfg.gaze_half_deg:
-            gw = 0.5
-        else:
-            gw = 0.0
-
-        raw = ew * gw
+        raw = EMOTION_WEIGHTS.get(inputs.emotion_label, 0.5) / max_w
 
         # EMA
         a = cfg.ema_alpha

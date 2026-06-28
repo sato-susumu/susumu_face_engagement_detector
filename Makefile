@@ -4,6 +4,31 @@
 PY := python3
 DATASET_ROOT ?= $(HOME)/datasets/wider_face
 YUNET_MODEL ?= $(HOME)/models/face_detection/face_detection_yunet_2023mar.onnx
+VIDEO_DEMO_SOURCE ?=
+VIDEO_DEMO_SAMPLE ?= cdc
+VIDEO_DEMO_SECONDS ?= 20
+VIDEO_DEMO_START ?= 7
+VIDEO_DEMO_RESIZE_WIDTH ?= 960
+VIDEO_DEMO_PROCESS_EVERY ?= 1
+VIDEO_DEMO_SCORE_THRESHOLD ?= 0.8
+VIDEO_DEMO_MATCH_TOLERANCE ?= 0.75
+VIDEO_DEMO_IDENTITY_MARGIN ?= 0.15
+VIDEO_DEMO_MIN_IDENTITY_FACE_PX ?= 110
+VIDEO_DEMO_HEADPOSE_SMOOTHING_ALPHA ?= 0.35
+VIDEO_DEMO_HEADPOSE_MAX_JUMP_DEG ?= 35
+VIDEO_DEMO_HEADPOSE_RESET_AFTER_MISSED ?= 10
+VIDEO_DEMO_OUTPUT ?= $(OUTPUTS_DIR)/runs/video_demo/annotated_engagement_demo.mp4
+VIDEO_DEMO_MULTI_START ?= 35
+VIDEO_DEMO_MULTI_SECONDS ?= 90
+VIDEO_DEMO_MULTI_RESIZE_WIDTH ?= 1920
+VIDEO_DEMO_MULTI_PROCESS_EVERY ?= 2
+VIDEO_DEMO_MULTI_MIN_IDENTITY_FACE_PX ?= 80
+VIDEO_DEMO_MULTI_OUTPUT ?= $(OUTPUTS_DIR)/runs/video_demo/annotated_multi_person_demo.mp4
+CHOKEPOINT_GT_OUTPUT ?= $(OUTPUTS_DIR)/runs/chokepoint/chokepoint_gt_face_id_demo.mp4
+CHOKEPOINT_GT_SECONDS ?= 30
+CHOKEPOINT_GT_MAX_IDENTITIES ?= 12
+CHOKEPOINT_GT_VISIBLE_IDENTITIES ?= 6
+CHOKEPOINT_GT_IDENTITY_MARGIN ?= 0.15
 
 OUTPUTS_DIR := outputs
 BASELINES_DIR := $(OUTPUTS_DIR)/baselines
@@ -24,6 +49,9 @@ help:
 	@echo "  visualize-detection        Detection overlays + AP/latency bars"
 	@echo "  visualize-recognition      LFW ROC + similarity distributions"
 	@echo "  visualize-engagement       Synthetic engagement timeline"
+	@echo "  video-demo                 Annotated demo video under outputs/runs/video_demo/"
+	@echo "  video-demo-multi           Longer multi-person annotated demo video"
+	@echo "  chokepoint-gt-demo         Ground-truth face/user ID demo video"
 	@echo ""
 	@echo "Reporting:"
 	@echo "  eval-report                outputs/reports/REPORT.md (figures embedded)"
@@ -113,6 +141,46 @@ visualize-engagement:
 	@mkdir -p $(FIGURES_DIR)/engagement
 	$(PY) -m eval.visualize engagement \
 		--out-dir $(FIGURES_DIR)/engagement
+
+.PHONY: video-demo
+video-demo:
+	@mkdir -p $(OUTPUTS_DIR)/runs/video_demo
+	$(PY) -m eval.video_demo \
+		$(if $(VIDEO_DEMO_SOURCE),--input $(VIDEO_DEMO_SOURCE),--sample $(VIDEO_DEMO_SAMPLE)) \
+		--output $(VIDEO_DEMO_OUTPUT) \
+		--max-seconds $(VIDEO_DEMO_SECONDS) \
+		--start-seconds $(VIDEO_DEMO_START) \
+		--resize-width $(VIDEO_DEMO_RESIZE_WIDTH) \
+		--process-every $(VIDEO_DEMO_PROCESS_EVERY) \
+		--score-threshold $(VIDEO_DEMO_SCORE_THRESHOLD) \
+		--match-tolerance $(VIDEO_DEMO_MATCH_TOLERANCE) \
+		--identity-margin $(VIDEO_DEMO_IDENTITY_MARGIN) \
+		--min-identity-face-px $(VIDEO_DEMO_MIN_IDENTITY_FACE_PX) \
+		--headpose-smoothing-alpha $(VIDEO_DEMO_HEADPOSE_SMOOTHING_ALPHA) \
+		--headpose-max-jump-deg $(VIDEO_DEMO_HEADPOSE_MAX_JUMP_DEG) \
+		--headpose-reset-after-missed $(VIDEO_DEMO_HEADPOSE_RESET_AFTER_MISSED) \
+		--model-path $(YUNET_MODEL)
+
+.PHONY: video-demo-multi
+video-demo-multi:
+	$(MAKE) video-demo \
+		VIDEO_DEMO_SAMPLE=multi_person \
+		VIDEO_DEMO_START=$(VIDEO_DEMO_MULTI_START) \
+		VIDEO_DEMO_SECONDS=$(VIDEO_DEMO_MULTI_SECONDS) \
+		VIDEO_DEMO_RESIZE_WIDTH=$(VIDEO_DEMO_MULTI_RESIZE_WIDTH) \
+		VIDEO_DEMO_PROCESS_EVERY=$(VIDEO_DEMO_MULTI_PROCESS_EVERY) \
+		VIDEO_DEMO_MIN_IDENTITY_FACE_PX=$(VIDEO_DEMO_MULTI_MIN_IDENTITY_FACE_PX) \
+		VIDEO_DEMO_OUTPUT=$(VIDEO_DEMO_MULTI_OUTPUT)
+
+.PHONY: chokepoint-gt-demo
+chokepoint-gt-demo:
+	@mkdir -p $(OUTPUTS_DIR)/runs/chokepoint
+	$(PY) -m eval.chokepoint_demo \
+		--output $(CHOKEPOINT_GT_OUTPUT) \
+		--seconds $(CHOKEPOINT_GT_SECONDS) \
+		--identity-margin $(CHOKEPOINT_GT_IDENTITY_MARGIN) \
+		--max-identities $(CHOKEPOINT_GT_MAX_IDENTITIES) \
+		--visible-identities $(CHOKEPOINT_GT_VISIBLE_IDENTITIES)
 
 # ---------------------------------------------------------------------------
 # Reporting

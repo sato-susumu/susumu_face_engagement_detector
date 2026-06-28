@@ -1,7 +1,7 @@
 # Susumu Face Engagement Detector — 根本変革計画 (Revamp Plan)
 
 **作成日**: 2026-06-26
-**最終更新**: 2026-06-26 (Phase 5+ 完了、レガシー完全削除済)
+**最終更新**: 2026-06-28 (Phase 5+ 完了、レガシー完全削除済)
 **対象バージョン**: ROS 2 Humble (現行) → Humble 維持
 **スコープ**: 技術スタック全面刷新 + 検証基盤新設 + メッセージ標準化
 
@@ -12,14 +12,14 @@
 | 0 | 完了 | 設計、3 並列技術調査、構成C採用、本書 |
 | 1 | 完了 | 評価ハーネス、WIDER FACE val 3,226画像で v0 ベースライン取得 (dlib HOG AP@0.5=13.70%)、`vision_msgs` 並行発行 |
 | 2 | 完了 | YuNet 統合 (AP **58.79%** = 4.3 倍, latency 10 倍高速)、LFW recognition baseline (**98.50%**)、`hri_msgs/IdsList` 並行発行 |
-| 3 | 完了 | `head_pose_node` (MediaPipe PnP) / `gaze_node` (MediaPipe iris) / `expression_node` (HSEmotion ONNX) 新設 |
+| 3 | 完了 | `head_pose_node` (MediaPipe PnP) / `expression_node` (HSEmotion ONNX) 新設 |
 | 4 | 完了 | `engagement_node` 新設 (Altuwairqi Concentration Index + 5 値 `hri_msgs/EngagementLevel` + EMA + ヒステリシス) |
 | 5 | 完了 | README/Makefile 整備、launch 整理 |
 | 5+ | 完了 | 成果物の `outputs/` 集約、`eval/visualize.py` で 3 カテゴリの図 PNG 自動生成、レポートに図埋め込み、**レガシー完全削除** (旧ノード/launch/scripts/docs/test_images/test/legacy/build成果物) |
 
 **最終テスト数**: 57/57 緑 (unit 38 + integration 9)。
 **成果物**: `outputs/{baselines,figures,reports}/` に集約、`make outputs` 一発で再生成。
-**現役ノード**: 6 個 (face_detection / face_recognition / head_pose / gaze / expression / engagement)。
+**現役ノード**: 5 個 (face_detection / face_recognition / head_pose / expression / engagement)。
 **リポジトリサイズ**: ~3.9 MB (build/install/log 除く)。
 
 
@@ -33,14 +33,14 @@
 |---|---|---|
 | 顔検出 | `face_recognition` (dlib HOG/CNN, 2018年頃の世代) | WIDER FACE Hard 圏でほぼ機能しない。ライブラリは2018年から実質メンテ停止 |
 | 顔認識 | dlib ResNet-34 128次元埋め込み | LFW 99.38% で飽和、IJB-C等の困難条件で SOTA に大差 |
-| 「注視」判定 | 顔の中心座標が画面中央近傍か | 視線方向ではない。顔位置トラッキング+正面顔判定にすぎず、本来のengagementを測れていない |
+| 関心度判定 | 顔の中心座標が画面中央近傍か | 顔位置トラッキング+正面顔判定にすぎず、本来のengagementを測れていない |
 | メッセージ | `std_msgs/String` にパイプ区切り独自フォーマット | 型安全性ゼロ、`ros2 bag` 再利用困難、可視化ツール非対応、業界標準不在 |
 | 検証 | `test_images/` の合成画像を目視 | 評価指標が存在しない。回帰検出不能。「先進化」の優劣を数値で語れない |
-| engagement定義 | DETECTED/LOST + ENGAGED/DISENGAGED の2値 | 表情・視線・頭部姿勢の統合という本来の定義から外れる |
+| engagement定義 | DETECTED/LOST + ENGAGED/DISENGAGED の2値 | 表情・頭部姿勢の統合という本来の定義から外れる |
 
 ### 1.2 変革の目的
 
-1. **「本物のengagement検出」を実装する** — 視線方向・頭部姿勢・表情を統合した、根拠ある engagement score を出す
+1. **「本物のengagement検出」を実装する** — 頭部姿勢・表情を統合した、根拠ある engagement score を出す
 2. **検証可能にする** — 公開ベンチマークに対する数値で性能を語れるようにする
 3. **業界標準に乗る** — ROS4HRI (REP-155) + `vision_msgs` 採用で、ros4hriエコシステムと相互運用可能にする
 4. **商用展開可能なライセンスを維持する** — Apache 2.0 / MIT / Boost のみで構築
@@ -64,8 +64,6 @@
 | 顔検出 (高精度) | SCRFD-500M | Apache 2.0 (要重み確認※) | 28ms/VGA | 3.6ms | InsightFace SCRFD はコードApache 2.0だが配布重みは非商用。**自前学習または YuNet で代替**必須 |
 | 顔認識 | MagFace (R50) | Apache 2.0 + 重みもApache 2.0 | 25ms | 5ms | LFW 99.83% / CFP-FP 98.46%、ArcFace相当 |
 | 顔認識 (fallback) | dlib face_recognition (128次元) | Boost SL + パブリックドメイン | 既存ベースライン維持 | - | 重み完全クリーン |
-| 視線方向 (GPU) | L2CS-Net | MIT | × | 推論可能 | MPIIGaze 3.92°, Gaze360 10.41° |
-| 視線方向 (CPU) | MediaPipe Face Landmarker (iris + blendshapes) | Apache 2.0 | 30+ FPS | - | 478 landmarks + 52 blendshapes、`eyeLookIn/Out/Up/Down` |
 | 頭部姿勢 | 6DRepNet | MIT | 動作可 | 高速 | AFLW2000 MAE 3.97°、ROS 2ラッパ既存 (`6DRepNet_ros`) |
 | 頭部姿勢 (CPU fallback) | MediaPipe Face Landmarker + solvePnP | Apache 2.0 | 30+ FPS | - | MAE 5-10° 程度 |
 | 表情認識 | HSEmotion-ONNX | Apache 2.0 (重み含む) | リアルタイム | 高速 | AffectNet 8-class 62.5%, EfficientNet系 |
@@ -84,7 +82,6 @@
 | 表情 | `hri_msgs/Expression` (categorical) | ROS4HRI | neutral/happy/sad/anger/etc |
 | 表情 (連続値) | `hri_msgs/SoftBiometrics` または独自 | ROS4HRI | valence/arousal |
 | 頭部姿勢 | TF フレーム `face_<id>` + `geometry_msgs/PoseStamped` | tf2 + standard | ROS4HRI 慣行 |
-| 視線方向 | `geometry_msgs/Vector3Stamped` (3D unit vector) | standard | 標準なし、独自トピック |
 | エンゲージメント | `hri_msgs/EngagementLevel` (5値) | ROS4HRI | UNKNOWN/DISENGAGED/ENGAGING/ENGAGED/DISENGAGING |
 | 既知人物ID | `hri_msgs/IdsList` | ROS4HRI | `/humans/persons/known` 等 |
 
@@ -96,7 +93,6 @@
 /humans/faces/<id>/roi            # RegionOfInterestStamped
 /humans/faces/<id>/landmarks      # FacialLandmarks (任意)
 /humans/faces/<id>/expression     # Expression
-/humans/faces/<id>/gaze           # 独自Vector3Stamped (3D視線方向)
 TF: camera_color_optical_frame → face_<id>  # 頭部6DoF姿勢
 /humans/persons/tracked           # IdsList
 /humans/persons/<id>/face_id      # std_msgs/String — face_id との関連
@@ -126,10 +122,6 @@ head_pose_node (新設)
   ├─ backend: 6drepnet | mediapipe_pnp
   └─ pub: TF face_<id>, PoseStamped
 
-gaze_node (新設、現gaze_analysis_node を再定義)
-  ├─ backend: l2cs | mediapipe_iris
-  └─ pub: /humans/faces/<id>/gaze (Vector3Stamped 3D unit vector)
-
 expression_node (新設)
   ├─ HSEmotion-ONNX
   └─ pub: /humans/faces/<id>/expression
@@ -139,7 +131,7 @@ person_manager_node
   └─ pub: /humans/persons/*
 
 engagement_node (現engagement_manager_node を再定義)
-  ├─ 入力: gaze, head_pose, expression
+  ├─ 入力: head_pose, expression
   ├─ Concentration Index 計算
   ├─ EMA + ヒステリシス + persistence判定
   └─ pub: /humans/persons/<id>/engagement_status
@@ -153,10 +145,9 @@ engagement_node (現engagement_manager_node を再定義)
 EmotionWeight:
   neutral: 0.9, happy: 0.7, surprise: 0.6, sad: 0.3,
   anger: 0.2, fear: 0.2, disgust: 0.1
-GazeWeight: 1.0 (camera direction±15°), 0.5 (±30°), 0.0 (>30°)
 HeadPoseGate: yaw ∈ [-15°, +15°] AND pitch ∈ [-10°, +10°] → pass
 
-raw_score = (EmotionWeight × GazeWeight) / max_emotion_weight  # ∈ [0, 1]
+raw_score = EmotionWeight / max_emotion_weight  # ∈ [0, 1]
 filtered_score = EMA(raw_score, α=0.3)
 gated_score = filtered_score if HeadPoseGate else filtered_score * 0.3
 
@@ -183,8 +174,6 @@ susumu_face_engagement_detector/
 │   ├── datasets/
 │   │   ├── wider_face/              # WIDER FACE downloader & GT parser
 │   │   ├── lfw/                     # LFW downloader & pair list
-│   │   ├── gaze360/                 # Gaze360 (非商用、研究のみ)
-│   │   ├── mpiigaze/                # MPIIGaze (CC BY-NC-SA)
 │   │   ├── aflw2000/                # 頭部姿勢
 │   │   ├── affectnet/               # 表情 (要申請)
 │   │   └── daisee/                  # engagement
@@ -195,7 +184,6 @@ susumu_face_engagement_detector/
 │   ├── runners/
 │   │   ├── run_detection_eval.py    # bag再生 → 出力収集 → mAP計算
 │   │   ├── run_recognition_eval.py  # 1:1 verification accuracy
-│   │   ├── run_gaze_eval.py         # 角度誤差 (度)
 │   │   ├── run_headpose_eval.py     # MAE per axis
 │   │   ├── run_emotion_eval.py      # confusion matrix, F1
 │   │   ├── run_engagement_eval.py   # DAiSEE accuracy
@@ -203,7 +191,6 @@ susumu_face_engagement_detector/
 │   ├── metrics/
 │   │   ├── detection.py             # AP, mAP
 │   │   ├── recognition.py
-│   │   ├── gaze.py                  # angular_error関数
 │   │   ├── headpose.py
 │   │   ├── tracking.py
 │   │   └── latency.py               # end-to-end latency
@@ -230,8 +217,6 @@ susumu_face_engagement_detector/
 | WIDER FACE | 顔検出 | 32,203画像 | 学術用 | 公式DL → 自作スクリプトで rosbag化 |
 | LFW | 顔認識 1:1 | 13,233画像/5,749名 | 学術用 | scikit-learn `fetch_lfw_pairs` |
 | CFP-FP | 顔認識 (横顔) | 7,000ペア | 学術用 | 公式DL |
-| MPIIGaze | 視線 | 213,659画像/15名 | CC BY-NC-SA | 公式DL (非商用、研究のみ) |
-| Gaze360 | 視線 | 172K crops/238名 | 非商用 | 公式DL |
 | AFLW2000-3D | 頭部姿勢 | 2,000画像 | 学術用 | 公式DL |
 | AffectNet | 表情 | 420Kラベル | 学術用 (PI申請) | PI署名後 |
 | DAiSEE | engagement | 9,068動画/112名 | 研究用 (form申請) | フォーム |
@@ -376,18 +361,13 @@ jobs:
 - LFW accuracy が v0 (99.38%) → v1 (>99.7%) に改善
 - 全テスト緑
 
-### Phase 3: 視線・姿勢・表情ノード新設 (3-4週間)
+### Phase 3: 姿勢・表情ノード新設 (3-4週間)
 
 - [ ] `head_pose_node` 新設
   - 6DRepNet ノード化 (`6DRepNet_ros` 参照)
   - MediaPipe + solvePnP fallback
   - TF + PoseStamped 配信
   - AFLW2000-3D で MAE 評価
-- [ ] `gaze_node` 新設 (現gaze_analysis_node は deprecate)
-  - L2CS-Net ノード化 (ROS 2ラッパ無いため自作必須)
-  - MediaPipe iris fallback
-  - `Vector3Stamped` で3D視線方向配信
-  - MPIIGaze で角度誤差評価
 - [ ] `expression_node` 新設
   - HSEmotion-ONNX 統合
   - `hri_msgs/Expression` 配信
@@ -396,7 +376,6 @@ jobs:
 - [ ] 各ノード単体で評価ベースライン取得
 
 **Definition of Done**:
-- gaze 角度誤差: MPIIGaze で <5°
 - head pose MAE: AFLW2000 で <5°
 - expression: AffectNet 8-class で >55%
 - 全ノードがCPU/GPU両モードで起動可
@@ -442,7 +421,6 @@ jobs:
 | リスク | 影響 | 対策 |
 |---|---|---|
 | SCRFD重みが非商用判定 | Phase 2で代替必要 | YuNet (Apache 2.0) にfallback。事前に学習レシピのみ Apache 2.0 として独自学習も検討 |
-| L2CS-Net重みのライセンス確認漏れ | Phase 3で代替必要 | MediaPipe iris fallback を必ず実装。GPUモードは「研究のみ」と明示する選択肢も |
 | MagFace重みの実体ライセンス | Phase 2でdlibに戻す可能性 | dlib (Boost SL, パブリックドメイン重み) を fallback として常設 |
 | データセット入手の遅延 | Phase 1 完了が遅れる | DAiSEE/AffectNetは申請が必要 — Phase 0で先に申請開始 |
 | 既存String I/Fの後方互換 | 既存ダウンストリーム破壊 | Phase 1-2 では並行配信、Phase 5 で非推奨化、v2.0 で削除 |
@@ -480,7 +458,6 @@ jobs:
 
 - YuNet (OpenCV Zoo): <https://github.com/opencv/opencv_zoo>
 - MagFace: <https://github.com/IrvingMeng/MagFace>
-- L2CS-Net: <https://github.com/Ahmednull/L2CS-Net>
 - 6DRepNet: <https://github.com/thohemp/6DRepNet>
 - HSEmotion-ONNX: <https://github.com/av-savchenko/hsemotion-onnx>
 - MediaPipe Face Landmarker: <https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker>
@@ -489,8 +466,6 @@ jobs:
 
 - WIDER FACE: <http://shuoyang1213.me/WIDERFACE/>
 - LFW: <http://vis-www.cs.umass.edu/lfw/>
-- MPIIGaze: <https://www.perceptualui.org/research/datasets/MPIIGaze/>
-- Gaze360: <https://gaze360.csail.mit.edu/>
 - AFLW2000-3D: <http://www.cbsr.ia.ac.cn/users/jjyan/main.htm>
 - AffectNet: <http://mohammadmahoor.com/affectnet/>
 - DAiSEE: <https://people.iith.ac.in/vineethnb/resources/daisee/>

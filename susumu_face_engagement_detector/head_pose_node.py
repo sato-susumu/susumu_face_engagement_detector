@@ -20,7 +20,7 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 
-from .backends.headpose import make_backend
+from .backends.headpose import HeadPoseStabilizer, make_backend
 
 
 def _ypr_to_quaternion(yaw_deg: float, pitch_deg: float, roll_deg: float) -> tuple[float, float, float, float]:
@@ -50,6 +50,12 @@ class HeadPoseNode(Node):
         self._backend = make_backend(backend_name)
         self._frame_id = self.get_parameter('frame_id').value
         self._publish_only_when_valid = self.get_parameter('publish_only_when_valid').value
+        self._stabilize = bool(self.get_parameter('stabilize').value)
+        self._stabilizer = HeadPoseStabilizer(
+            ema_alpha=float(self.get_parameter('smoothing_alpha').value),
+            max_jump_deg=float(self.get_parameter('max_jump_deg').value),
+            reset_after_missed=int(self.get_parameter('reset_after_missed').value),
+        )
 
         topic = self.get_parameter('image_topic').value
         image_qos = QoSProfile(
@@ -70,6 +76,10 @@ class HeadPoseNode(Node):
             ('head_pose_backend', 'mediapipe_pnp'),
             ('frame_id', 'camera_color_optical_frame'),
             ('publish_only_when_valid', True),
+            ('stabilize', True),
+            ('smoothing_alpha', 0.35),
+            ('max_jump_deg', 35.0),
+            ('reset_after_missed', 10),
         ]:
             self.declare_parameter(name, default)
 
@@ -82,9 +92,14 @@ class HeadPoseNode(Node):
 
         ypr = self._backend.estimate(bgr)
         if ypr is None:
+            self._stabilizer.mark_missed()
             if self._publish_only_when_valid:
                 return
             ypr = (0.0, 0.0, 0.0)
+        elif self._stabilize:
+            stable_ypr = self._stabilizer.update(ypr)
+            if stable_ypr is not None:
+                ypr = stable_ypr
 
         yaw, pitch, roll = ypr
         qx, qy, qz, qw = _ypr_to_quaternion(yaw, pitch, roll)

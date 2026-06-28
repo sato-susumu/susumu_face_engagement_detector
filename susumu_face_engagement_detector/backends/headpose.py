@@ -14,6 +14,7 @@ MediaPipe backend uses Face Landmarker + solvePnP against a canonical
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import cv2
@@ -60,6 +61,103 @@ def _rvec_to_ypr(rvec: np.ndarray) -> YPR:
         yaw = float(np.degrees(np.arctan2(-rmat[2, 0], sy)))
         roll = 0.0
     return yaw, pitch, roll
+
+
+def normalize_pose_angle(angle: Optional[float]) -> Optional[float]:
+    """Fold Euler flips into the range normally useful for visible faces."""
+    if angle is None or not np.isfinite(angle):
+        return None
+    while angle > 180.0:
+        angle -= 360.0
+    while angle < -180.0:
+        angle += 360.0
+    if angle > 90.0:
+        angle -= 180.0
+    elif angle < -90.0:
+        angle += 180.0
+    return float(angle)
+
+
+def _axis_flip_correction(
+    value: float,
+    previous: float,
+    max_jump_deg: float,
+    min_flip_abs_deg: float,
+) -> float:
+    """Prefer the mirrored sign only when a large opposite-sign jump appears.
+
+    This handles the common PnP ambiguity where a stable head suddenly appears
+    as the same magnitude with opposite yaw/pitch for one or more frames.
+    Gradual turns through zero are left untouched.
+    """
+    if abs(value) < min_flip_abs_deg or abs(previous) < min_flip_abs_deg:
+        return value
+    if value * previous >= 0.0:
+        return value
+    direct_jump = abs(value - previous)
+    mirrored = -value
+    mirrored_jump = abs(mirrored - previous)
+    if direct_jump > max_jump_deg and mirrored_jump < direct_jump:
+        return mirrored
+    return value
+
+
+@dataclass
+class HeadPoseStabilizer:
+    """Temporal stabilizer for head pose estimates.
+
+    Landmark/PnP head pose is prone to mirrored Euler solutions. The stabilizer
+    keeps the estimate continuous per tracked face and smooths small jitter.
+    """
+
+    ema_alpha: float = 0.35
+    max_jump_deg: float = 35.0
+    min_flip_abs_deg: float = 12.0
+    reset_after_missed: int = 10
+
+    _last: Optional[YPR] = None
+    _missed: int = 0
+
+    def update(self, ypr: Optional[YPR]) -> Optional[YPR]:
+        if ypr is None:
+            self.mark_missed()
+            return None
+
+        yaw = normalize_pose_angle(ypr[0])
+        pitch = normalize_pose_angle(ypr[1])
+        roll = normalize_pose_angle(ypr[2])
+        if yaw is None or pitch is None or roll is None:
+            self.mark_missed()
+            return None
+
+        candidate = (yaw, pitch, roll)
+        if self._last is None:
+            self._last = candidate
+            self._missed = 0
+            return candidate
+
+        prev_yaw, prev_pitch, prev_roll = self._last
+        yaw = _axis_flip_correction(yaw, prev_yaw, self.max_jump_deg, self.min_flip_abs_deg)
+        pitch = _axis_flip_correction(pitch, prev_pitch, self.max_jump_deg, self.min_flip_abs_deg)
+
+        alpha = max(0.0, min(1.0, float(self.ema_alpha)))
+        smoothed = (
+            prev_yaw + alpha * (yaw - prev_yaw),
+            prev_pitch + alpha * (pitch - prev_pitch),
+            prev_roll + alpha * (roll - prev_roll),
+        )
+        self._last = smoothed
+        self._missed = 0
+        return smoothed
+
+    def mark_missed(self) -> None:
+        self._missed += 1
+        if self._missed >= self.reset_after_missed:
+            self.reset()
+
+    def reset(self) -> None:
+        self._last = None
+        self._missed = 0
 
 
 class HeadPoseBackend:

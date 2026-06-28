@@ -116,7 +116,7 @@ class FaceDetectionNode(Node):
             # NEW (Phase 2): pluggable backend selection.
             ('detection_backend', ''),     # '' → fall back to detection_model
             ('model_path', ''),            # backend-specific (YuNet ONNX, …)
-            ('score_threshold', 0.5),
+            ('score_threshold', 0.8),
             ('nms_threshold', 0.3),
             # LEGACY
             ('detection_model', 'hog'),

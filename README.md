@@ -1,6 +1,6 @@
 # Susumu Face Engagement Detector
 
-カメラ映像から **顔検出 → 認識 → 頭部姿勢 → 視線方向 → 表情 → エンゲージメント** までを ROS 2 (Humble) で行うパッケージです。
+カメラ映像から **顔検出 → 認識 → 頭部姿勢 → 表情 → エンゲージメント** までを ROS 2 (Humble) で行うパッケージです。
 
 出力は [ROS4HRI / REP-155](https://github.com/ros-infrastructure/rep/blob/master/rep-0155.rst) と [vision_msgs](https://github.com/ros-perception/vision_msgs) の標準メッセージに準拠。すべての評価結果と図は [`outputs/`](outputs/) 配下に自動集約され、`make outputs` で再現可能です。
 
@@ -35,9 +35,6 @@ camera/color/image_raw
     ├─→ head_pose_node ──────── geometry_msgs/PoseStamped
     │      backend: mediapipe_pnp
     │
-    ├─→ gaze_node ───────────── geometry_msgs/Vector3Stamped
-    │      backend: mediapipe_iris
-    │
     ├─→ expression_node ─────── hri_msgs/Expression
     │      backend: hsemotion (Apache 2.0)
     │
@@ -60,7 +57,7 @@ sudo apt install \
     ros-humble-hri-msgs \
     ros-humble-rosbag2-storage-mcap
 
-pip3 install --user mediapipe hsemotion-onnx face_recognition opencv-contrib-python
+pip3 install --user "protobuf<5,>=4.25.3" mediapipe hsemotion-onnx face_recognition opencv-contrib-python
 ```
 
 ### 2. モデル重みの取得 (どちらも Apache 2.0)
@@ -88,7 +85,7 @@ source install/setup.bash
 ### 4. 起動
 
 ```bash
-# フルパイプライン (YuNet + head_pose + gaze + expression + engagement)
+# フルパイプライン (YuNet + head_pose + expression + engagement)
 ros2 launch susumu_face_engagement_detector engagement_pipeline.launch.py
 
 # トピック確認
@@ -104,10 +101,76 @@ ros2 run susumu_face_engagement_detector face_detection_node \
                -p model_path:=$HOME/models/face_detection/face_detection_yunet_2023mar.onnx
 
 ros2 run susumu_face_engagement_detector head_pose_node
-ros2 run susumu_face_engagement_detector gaze_node
 ros2 run susumu_face_engagement_detector expression_node
 ros2 run susumu_face_engagement_detector engagement_node
 ```
+
+### 5. 動画ファイルで機能を確認する
+
+ROS 2 カメラ入力を用意しなくても、通常の動画ファイルから **顔検出 / 簡易人物 ID / 頭部姿勢 / 表情 / エンゲージメント** を重畳した MP4 を生成できます。
+
+```bash
+# public domain のサンプル動画を自動取得し、顔が出る 7 秒地点から 20 秒を注釈付き MP4 に変換
+make video-demo
+
+# 複数人物が同じ画面に長く映る 90 秒デモを生成
+make video-demo-multi
+
+# 正解ユーザーID付き ChokePoint 顔IDデモを生成 (CC BY-NC 4.0、非商用検証用)
+make chokepoint-gt-demo
+
+# 自前の動画を使う場合
+make video-demo VIDEO_DEMO_SOURCE=/path/to/input.mp4 VIDEO_DEMO_START=0 VIDEO_DEMO_SECONDS=0
+
+# 顔検出の信頼度閾値。0.8 未満は顔として扱わず、描画・認識・表情推定に回しません
+make video-demo VIDEO_DEMO_SCORE_THRESHOLD=0.8
+
+# 同一人物の ID が割れる場合は embedding 閾値を少し緩める
+make video-demo VIDEO_DEMO_MATCH_TOLERANCE=0.75
+
+# 1位候補と直前IDの距離差が小さい場合は直前IDを維持する
+make video-demo VIDEO_DEMO_IDENTITY_MARGIN=0.15
+
+# 小さい顔にも人物 ID を付けたい場合は下げる。特徴量が不安定になり誤認は増えます
+make video-demo VIDEO_DEMO_MIN_IDENTITY_FACE_PX=80
+```
+
+人物 ID は顔特徴量 embedding の距離が閾値内のときだけ既存 `user_*` に割り当てます。距離が近い候補が複数ある場合は、`VIDEO_DEMO_IDENTITY_MARGIN` の範囲で直前に表示していたトラック ID を優先します。特徴量が取れない顔や、サイズ不足で特徴量が不安定な顔には人物 ID を付けず、`face` / `unidentified` として扱います。
+
+成果物:
+
+```text
+outputs/runs/video_demo/
+├── there_isnt_just_one_face_to_breast_cancer.webm  # デフォルト入力動画
+├── annotated_engagement_demo.mp4                   # 注釈付き出力動画
+├── nasa_astronauts_discuss_life_in_space_multi_person.webm  # 複数人物の長尺入力動画
+├── annotated_multi_person_demo.mp4                 # 複数人物の注釈付き出力動画
+└── annotated_engagement_demo.mp4.json              # 実行メタデータ
+```
+
+デフォルト入力は Wikimedia Commons の [There Isn’t Just One Face to Breast Cancer](https://commons.wikimedia.org/wiki/File:There_Isn%E2%80%99t_Just_One_Face_to_Breast_Cancer.webm) です。CDC/HHS 制作の米国連邦政府職務著作として public domain と表示されているため、複製して検証入力に使えます。
+
+複数人物デモ入力は Wikimedia Commons の [NASA Astronauts Discuss Life In Space With Fox News](https://commons.wikimedia.org/wiki/File:NASA_Astronauts_Discuss_Life_In_Space_With_Fox_News_%28iss073m262461622%29.webm) です。NASA Johnson Space Center 制作の public domain 動画で、同じ画面に複数の人物がはっきり映ります。`make video-demo-multi` はこの長尺入力の 35 秒地点から 90 秒を 1920px 幅の注釈付き MP4 にします。
+
+正解データ付きデモは [ChokePoint Dataset](https://zenodo.org/records/815657) を使います。人物ID別の顔 crop 連番から、GT `person_id` と認識結果を並べた MP4 と JSON を生成します。ChokePoint は **CC BY-NC 4.0** なので、非商用の検証・研究用途として扱ってください。
+`make chokepoint-gt-demo CHOKEPOINT_GT_IDENTITY_MARGIN=0.15` のように指定すると、GT デモでも直前表示 ID を優先する margin を調整できます。
+
+内蔵の複数人物サンプルを直接 CLI で実行する場合:
+
+```bash
+python3 -m eval.video_demo \
+    --sample multi_person \
+    --output outputs/runs/video_demo/annotated.mp4 \
+    --start-seconds 0 \
+    --max-seconds 30 \
+    --score-threshold 0.8 \
+    --match-tolerance 0.75 \
+    --identity-margin 0.15 \
+    --min-identity-face-px 110 \
+    --model-path $HOME/models/face_detection/face_detection_yunet_2023mar.onnx
+```
+
+自前動画を直接 CLI で実行する場合は `--input /path/to/input.mp4` を指定します。
 
 ---
 
@@ -187,7 +250,6 @@ make clean-outputs
 | `/face_detections_vision` | `vision_msgs/Detection2DArray` | ros-perception |
 | `/humans/faces/tracked` | `hri_msgs/IdsList` | REP-155 |
 | `/humans/faces/head_pose` | `geometry_msgs/PoseStamped` | 標準 |
-| `/humans/faces/gaze` | `geometry_msgs/Vector3Stamped` | 標準 |
 | `/humans/faces/expression` | `hri_msgs/Expression` | REP-155 |
 | `/humans/persons/<id>/engagement_status` | `hri_msgs/EngagementLevel` (5値) | REP-155 |
 | `/humans/persons/<id>/engagement_score` | `std_msgs/Float32` (連続値) | 補助 |
@@ -204,10 +266,9 @@ make clean-outputs
 
 ```
 EmotionWeight = {neutral: 0.9, happy: 0.7, surprise: 0.6, sad: 0.3, ...}
-GazeWeight    = 1.0 (≤15°) | 0.5 (≤30°) | 0.0 (>30°)
 HeadPoseGate  = (|yaw|<15°) AND (|pitch|<10°)  → pass
 
-raw   = EmotionWeight × GazeWeight / max(EmotionWeights)
+raw   = EmotionWeight / max(EmotionWeights)
 filt  = EMA(raw, α=0.3)
 gated = filt if HeadPoseGate else filt × 0.3
 
@@ -234,7 +295,6 @@ EngagementLevel (hri_msgs/EngagementLevel):
 | 検出 | `yunet` | Apache 2.0 (重み含む) |
 | 認識 | `dlib_128d` | Boost SL + パブリックドメイン重み |
 | 頭部姿勢 | `mediapipe_pnp` | Apache 2.0 |
-| 視線 | `mediapipe_iris` | Apache 2.0 |
 | 表情 | `hsemotion` | Apache 2.0 (重み含む) |
 
 ### 研究 / 非商用 SOTA
@@ -243,7 +303,6 @@ EngagementLevel (hri_msgs/EngagementLevel):
 
 - 検出: SCRFD-10G (InsightFace) → WIDER Hard AP 83.05%
 - 認識: ArcFace R100 / AdaFace → IJB-C(1e-4) 97%+
-- 視線: L2CS-Net (MIT) → MPIIGaze 3.92° (GPU 推奨)
 
 backend 切替は ROS param のみ — コード変更不要。
 
@@ -281,7 +340,7 @@ Apache License 2.0 (本パッケージのコード)。各バックエンドの**
 
 - **Phase 5+**: `outputs/` への成果物集約、可視化 (matplotlib) 自動生成、レポートへの図埋め込み、レガシー一掃 (旧ノード/launch/scripts/docs/test_images すべて削除)
 - **Phase 4**: `engagement_node` 再設計 (Concentration Index + 5値 EngagementLevel)
-- **Phase 3**: `head_pose_node` / `gaze_node` / `expression_node` 新設
+- **Phase 3**: `head_pose_node` / `expression_node` 新設
 - **Phase 2**: 検出 YuNet 化 (AP 4.3 倍)、`face_recognition_node` IdsList 並行発行
 - **Phase 1**: 評価ハーネス + WIDER FACE / LFW ベースライン取得 + `vision_msgs` 並行発行
 - **Phase 0**: 設計レビュー、3 並列技術調査、`docs/REVAMP_PLAN.md`

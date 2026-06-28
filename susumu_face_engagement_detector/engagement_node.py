@@ -3,7 +3,6 @@
 Inputs:
     /humans/faces/expression             hri_msgs/Expression
     /humans/faces/expression_scores      std_msgs/String (JSON probabilities)
-    /humans/faces/gaze                   geometry_msgs/Vector3Stamped
     /humans/faces/head_pose              geometry_msgs/PoseStamped
 
 Output:
@@ -20,7 +19,7 @@ import json
 import math
 from typing import Optional
 
-from geometry_msgs.msg import PoseStamped, Vector3Stamped
+from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from std_msgs.msg import Float32, String
 
@@ -72,8 +71,6 @@ class EngagementNode(Node):
         super().__init__('engagement_node')
         self._declare_params()
         self._scorer = EngagementScorer(EngagementConfig(
-            gaze_full_deg=float(self.get_parameter('gaze_full_deg').value),
-            gaze_half_deg=float(self.get_parameter('gaze_half_deg').value),
             yaw_gate_deg=float(self.get_parameter('yaw_gate_deg').value),
             pitch_gate_deg=float(self.get_parameter('pitch_gate_deg').value),
             gate_penalty=float(self.get_parameter('gate_penalty').value),
@@ -90,7 +87,6 @@ class EngagementNode(Node):
 
         # State latched from inbound topics
         self._last_emotion: Optional[str] = None
-        self._last_gaze_deg: Optional[float] = None
         self._last_yaw: Optional[float] = None
         self._last_pitch: Optional[float] = None
         self._last_level = None
@@ -101,8 +97,6 @@ class EngagementNode(Node):
                                      self._on_expression, 10)
         self.create_subscription(String, '/humans/faces/expression_scores',
                                  self._on_expression_scores, 10)
-        self.create_subscription(Vector3Stamped, '/humans/faces/gaze',
-                                 self._on_gaze, 10)
         self.create_subscription(PoseStamped, '/humans/faces/head_pose',
                                  self._on_head_pose, 10)
 
@@ -134,8 +128,6 @@ class EngagementNode(Node):
         for name, default in [
             ('person_id', 'default'),
             ('update_hz', 5.0),
-            ('gaze_full_deg', 15.0),
-            ('gaze_half_deg', 30.0),
             ('yaw_gate_deg', 15.0),
             ('pitch_gate_deg', 10.0),
             ('gate_penalty', 0.3),
@@ -164,13 +156,6 @@ class EngagementNode(Node):
         if self._last_emotion is None:
             self._last_emotion = label
 
-    def _on_gaze(self, msg) -> None:
-        v = msg.vector
-        # Vector is in camera optical frame (+Z forward). Angle to +Z axis.
-        magnitude = math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) or 1.0
-        cos_a = max(-1.0, min(1.0, v.z / magnitude))
-        self._last_gaze_deg = math.degrees(math.acos(cos_a))
-
     def _on_head_pose(self, msg) -> None:
         q = msg.pose.orientation
         yaw, pitch, _roll = _quat_to_yaw_pitch_roll(q.x, q.y, q.z, q.w)
@@ -180,7 +165,6 @@ class EngagementNode(Node):
     def _on_tick(self) -> None:
         inputs = EngagementInputs(
             emotion_label=self._last_emotion,
-            gaze_angle_deg=self._last_gaze_deg,
             yaw_deg=self._last_yaw,
             pitch_deg=self._last_pitch,
         )

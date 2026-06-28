@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 from susumu_face_engagement_detector.backends.headpose import (
+    HeadPoseStabilizer,
     _rvec_to_ypr,
     available_backends,
     make_backend,
@@ -33,3 +34,21 @@ def test_rvec_yaw_90deg() -> None:
     rvec = np.array([[0.0], [np.pi / 2], [0.0]])
     yaw, _pitch, _roll = _rvec_to_ypr(rvec)
     assert abs(abs(yaw) - 90.0) < 1.0
+
+
+def test_stabilizer_corrects_abrupt_mirrored_yaw() -> None:
+    stabilizer = HeadPoseStabilizer(ema_alpha=1.0, max_jump_deg=35.0)
+    assert stabilizer.update((-25.0, -10.0, 0.0)) == pytest.approx((-25.0, -10.0, 0.0))
+
+    # PnP can briefly report the same magnitude with the opposite sign.
+    corrected = stabilizer.update((25.0, -10.0, 0.0))
+    assert corrected == pytest.approx((-25.0, -10.0, 0.0))
+
+
+def test_stabilizer_allows_gradual_turn_through_center() -> None:
+    stabilizer = HeadPoseStabilizer(ema_alpha=1.0, max_jump_deg=35.0)
+    stabilizer.update((-25.0, 0.0, 0.0))
+    stabilizer.update((-8.0, 0.0, 0.0))
+    stabilizer.update((8.0, 0.0, 0.0))
+    turned = stabilizer.update((25.0, 0.0, 0.0))
+    assert turned == pytest.approx((25.0, 0.0, 0.0))

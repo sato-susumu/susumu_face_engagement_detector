@@ -103,6 +103,4 @@ The bag bundles two topics:
 * **WIDER FACE** — academic use, faces from public sources. See
   <http://shuoyang1213.me/WIDERFACE/>.
 * **LFW** — academic use only. <http://vis-www.cs.umass.edu/lfw/>
-* **MPIIGaze, Gaze360, ETH-XGaze** — CC BY-NC-SA (NON-commercial). Use these
-  only for research-mode evaluations.
 * **DAiSEE, AffectNet** — require online application; do not commit copies.
