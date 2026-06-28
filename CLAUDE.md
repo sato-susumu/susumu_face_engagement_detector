@@ -11,6 +11,7 @@
 | `face_detection_node` | 顔検出 | `/face_detections_vision` (Detection2DArray) | dlib_hog / dlib_cnn / yunet |
 | `face_recognition_node` | 顔認識・ID追跡 | `/humans/faces/tracked` (IdsList) | dlib_128d |
 | `head_pose_node` | 頭部姿勢 | `/humans/faces/head_pose` (PoseStamped) | mediapipe_pnp |
+| `gaze_node` | 視線推定 | `/humans/faces/gaze` (Vector3Stamped) | openvino_adas (optional) |
 | `expression_node` | 表情 | `/humans/faces/expression` (Expression) | hsemotion (Apache 2.0) |
 | `engagement_node` | エンゲージメント | `/humans/persons/<id>/engagement_status` (EngagementLevel) | Concentration Index + EMA + ヒステリシス |
 
@@ -25,7 +26,7 @@ colcon build --packages-select susumu_face_engagement_detector
 # 起動
 ros2 launch susumu_face_engagement_detector engagement_pipeline.launch.py
 
-# テスト (57件)
+# テスト
 make test
 
 # 評価・可視化を一発で

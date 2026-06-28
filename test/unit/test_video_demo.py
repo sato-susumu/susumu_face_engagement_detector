@@ -14,6 +14,11 @@ def test_video_demo_defaults_reject_low_confidence_faces():
     assert args.sample == "cdc"
     assert args.score_threshold == 0.8
     assert args.identity_margin == 0.15
+    assert args.identity_score_threshold == 0.9
+    assert args.identity_max_head_yaw_deg == 40.0
+    assert args.identity_max_head_pitch_deg == 25.0
+    assert args.gaze_backend == "openvino_adas"
+    assert args.no_gaze is False
 
 
 def test_video_demo_has_multi_person_sample():
@@ -64,7 +69,6 @@ def test_embedding_tracker_reuses_identity_when_embedding_is_similar():
     near = np.zeros(128)
     near[0] = 0.1
 
-    tracker.start_frame(0)
     assert tracker.identify(first, (10, 50, 60, 10)) == "user_1"
     assert tracker.identify(near, (100, 150, 160, 100)) == "user_1"
     assert tracker.tracked_count == 1
@@ -98,6 +102,19 @@ def test_embedding_tracker_prefers_previous_track_when_distances_are_close():
 
     tracker.start_frame(1)
     assert tracker.identify(query, (12, 52, 62, 12)) == "user_1"
+
+
+def test_embedding_tracker_does_not_reuse_same_user_in_one_frame():
+    tracker = EmbeddingTracker(tolerance=0.6)
+    first = np.zeros(128)
+    duplicate = np.zeros(128)
+    duplicate[0] = 0.1
+
+    tracker.start_frame(0)
+    assert tracker.identify(first, (10, 50, 60, 10)) == "user_1"
+    assert tracker.identify(duplicate, (100, 150, 160, 100)) == "unidentified"
+    assert tracker.tracked_count == 1
+    assert tracker.identity_count == 1
 
 
 def test_bbox_iou():

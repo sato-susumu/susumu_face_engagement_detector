@@ -23,7 +23,7 @@ make eval-detection-baseline   # outputs/baselines/v0_dlib_hog_wider_val.json
 make eval-detection-yunet      # outputs/baselines/v1_yunet_wider_val.json
 make eval-recognition-baseline # outputs/baselines/v0_dlib_128d_lfw.json
 make visualize                 # outputs/figures/ 配下に PNG 一式
-make video-demo                # public domain 動画を入力に、注釈付き MP4 を生成
+make video-demo                # public domain 動画を入力に、注釈付き MP4 を生成 (OpenVINO gaze model があれば視線も描画)
 make video-demo-multi          # 複数人物がはっきり映る長尺 public domain 動画で MP4 を生成
 make chokepoint-gt-demo        # 正解人物ID付き ChokePoint 顔IDデモ MP4 + JSON を生成
 make eval-report               # outputs/reports/REPORT.md (図リンク埋め込み)

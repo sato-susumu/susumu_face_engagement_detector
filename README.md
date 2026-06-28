@@ -1,6 +1,6 @@
 # Susumu Face Engagement Detector
 
-カメラ映像から **顔検出 → 認識 → 頭部姿勢 → 表情 → エンゲージメント** までを ROS 2 (Humble) で行うパッケージです。
+カメラ映像から **顔検出 → 認識 → 頭部姿勢 → 視線推定 → 表情 → エンゲージメント** までを ROS 2 (Humble) で行うパッケージです。視線推定は OpenVINO モデルがある時だけ有効にする optional 機能です。
 
 出力は [ROS4HRI / REP-155](https://github.com/ros-infrastructure/rep/blob/master/rep-0155.rst) と [vision_msgs](https://github.com/ros-perception/vision_msgs) の標準メッセージに準拠。すべての評価結果と図は [`outputs/`](outputs/) 配下に自動集約され、`make outputs` で再現可能です。
 
@@ -35,6 +35,9 @@ camera/color/image_raw
     ├─→ head_pose_node ──────── geometry_msgs/PoseStamped
     │      backend: mediapipe_pnp
     │
+    ├─→ gaze_node ───────────── geometry_msgs/Vector3Stamped
+    │      backend: openvino_adas (optional)
+    │
     ├─→ expression_node ─────── hri_msgs/Expression
     │      backend: hsemotion (Apache 2.0)
     │
@@ -58,6 +61,18 @@ sudo apt install \
     ros-humble-rosbag2-storage-mcap
 
 pip3 install --user "protobuf<5,>=4.25.3" mediapipe hsemotion-onnx face_recognition opencv-contrib-python
+```
+
+OpenVINO 視線推定を使う場合だけ、追加で OpenVINO とモデルを用意します。
+
+```bash
+pip3 install --user openvino
+
+mkdir -p ~/models/gaze_estimation/intel/gaze-estimation-adas-0002/FP32
+wget https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/1/gaze-estimation-adas-0002/FP32/gaze-estimation-adas-0002.xml \
+    -O ~/models/gaze_estimation/intel/gaze-estimation-adas-0002/FP32/gaze-estimation-adas-0002.xml
+wget https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/1/gaze-estimation-adas-0002/FP32/gaze-estimation-adas-0002.bin \
+    -O ~/models/gaze_estimation/intel/gaze-estimation-adas-0002/FP32/gaze-estimation-adas-0002.bin
 ```
 
 ### 2. モデル重みの取得 (どちらも Apache 2.0)
@@ -88,6 +103,11 @@ source install/setup.bash
 # フルパイプライン (YuNet + head_pose + expression + engagement)
 ros2 launch susumu_face_engagement_detector engagement_pipeline.launch.py
 
+# OpenVINO 視線推定も起動する場合
+ros2 launch susumu_face_engagement_detector engagement_pipeline.launch.py \
+    enable_gaze:=true \
+    gaze_model_path:=$HOME/models/gaze_estimation/intel/gaze-estimation-adas-0002/FP32/gaze-estimation-adas-0002.xml
+
 # トピック確認
 ros2 topic echo /humans/persons/default/engagement_status
 ros2 topic echo /humans/persons/default/engagement_score
@@ -101,13 +121,15 @@ ros2 run susumu_face_engagement_detector face_detection_node \
                -p model_path:=$HOME/models/face_detection/face_detection_yunet_2023mar.onnx
 
 ros2 run susumu_face_engagement_detector head_pose_node
+ros2 run susumu_face_engagement_detector gaze_node \
+    --ros-args -p gaze_model_path:=$HOME/models/gaze_estimation/intel/gaze-estimation-adas-0002/FP32/gaze-estimation-adas-0002.xml
 ros2 run susumu_face_engagement_detector expression_node
 ros2 run susumu_face_engagement_detector engagement_node
 ```
 
 ### 5. 動画ファイルで機能を確認する
 
-ROS 2 カメラ入力を用意しなくても、通常の動画ファイルから **顔検出 / 簡易人物 ID / 頭部姿勢 / 表情 / エンゲージメント** を重畳した MP4 を生成できます。
+ROS 2 カメラ入力を用意しなくても、通常の動画ファイルから **顔検出 / 簡易人物 ID / 頭部姿勢 / 視線 / 表情 / エンゲージメント** を重畳した MP4 を生成できます。OpenVINO gaze model が未配置の場合、視線だけ無効化して処理を続けます。
 
 ```bash
 # public domain のサンプル動画を自動取得し、顔が出る 7 秒地点から 20 秒を注釈付き MP4 に変換
@@ -125,6 +147,9 @@ make video-demo VIDEO_DEMO_SOURCE=/path/to/input.mp4 VIDEO_DEMO_START=0 VIDEO_DE
 # 顔検出の信頼度閾値。0.8 未満は顔として扱わず、描画・認識・表情推定に回しません
 make video-demo VIDEO_DEMO_SCORE_THRESHOLD=0.8
 
+# 人物IDを付ける信頼度閾値。顔としては描画しても、0.9 未満は user_* を付けません
+make video-demo VIDEO_DEMO_IDENTITY_SCORE_THRESHOLD=0.90
+
 # 同一人物の ID が割れる場合は embedding 閾値を少し緩める
 make video-demo VIDEO_DEMO_MATCH_TOLERANCE=0.75
 
@@ -133,9 +158,12 @@ make video-demo VIDEO_DEMO_IDENTITY_MARGIN=0.15
 
 # 小さい顔にも人物 ID を付けたい場合は下げる。特徴量が不安定になり誤認は増えます
 make video-demo VIDEO_DEMO_MIN_IDENTITY_FACE_PX=80
+
+# 視線推定を明示的に無効化する場合
+make video-demo VIDEO_DEMO_NO_GAZE=1
 ```
 
-人物 ID は顔特徴量 embedding の距離が閾値内のときだけ既存 `user_*` に割り当てます。距離が近い候補が複数ある場合は、`VIDEO_DEMO_IDENTITY_MARGIN` の範囲で直前に表示していたトラック ID を優先します。特徴量が取れない顔や、サイズ不足で特徴量が不安定な顔には人物 ID を付けず、`face` / `unidentified` として扱います。
+人物 ID は、顔検出信頼度・顔サイズ・頭部姿勢が ID 付与条件を満たし、かつ顔特徴量 embedding の距離が閾値内のときだけ既存 `user_*` に割り当てます。同一フレーム内で同じ `user_*` を複数の顔へ割り当てることはありません。距離が近い候補が複数ある場合は、`VIDEO_DEMO_IDENTITY_MARGIN` の範囲で直前に表示していたトラック ID を優先します。特徴量が取れない顔や、サイズ不足・低信頼度・横向きなどで特徴量が不安定な顔には人物 ID を付けず、`face` / `unidentified` として扱います。
 
 成果物:
 
@@ -164,8 +192,10 @@ python3 -m eval.video_demo \
     --start-seconds 0 \
     --max-seconds 30 \
     --score-threshold 0.8 \
+    --identity-score-threshold 0.9 \
     --match-tolerance 0.75 \
     --identity-margin 0.15 \
+    --gaze-model-path $HOME/models/gaze_estimation/intel/gaze-estimation-adas-0002/FP32/gaze-estimation-adas-0002.xml \
     --min-identity-face-px 110 \
     --model-path $HOME/models/face_detection/face_detection_yunet_2023mar.onnx
 ```
@@ -250,6 +280,7 @@ make clean-outputs
 | `/face_detections_vision` | `vision_msgs/Detection2DArray` | ros-perception |
 | `/humans/faces/tracked` | `hri_msgs/IdsList` | REP-155 |
 | `/humans/faces/head_pose` | `geometry_msgs/PoseStamped` | 標準 |
+| `/humans/faces/gaze` | `geometry_msgs/Vector3Stamped` | 標準 |
 | `/humans/faces/expression` | `hri_msgs/Expression` | REP-155 |
 | `/humans/persons/<id>/engagement_status` | `hri_msgs/EngagementLevel` (5値) | REP-155 |
 | `/humans/persons/<id>/engagement_score` | `std_msgs/Float32` (連続値) | 補助 |
@@ -281,6 +312,7 @@ EngagementLevel (hri_msgs/EngagementLevel):
 ```
 
 すべての閾値・EMA係数・ヒステリシス回数は `engagement_node` の ROS param で調整可能。式の根拠と意思決定経緯は [docs/REVAMP_PLAN.md §2.5](docs/REVAMP_PLAN.md)。
+OpenVINO 視線推定は `/humans/faces/gaze` と動画注釈に出力しますが、現時点では engagement score の入力には使っていません。
 
 ---
 
@@ -295,6 +327,7 @@ EngagementLevel (hri_msgs/EngagementLevel):
 | 検出 | `yunet` | Apache 2.0 (重み含む) |
 | 認識 | `dlib_128d` | Boost SL + パブリックドメイン重み |
 | 頭部姿勢 | `mediapipe_pnp` | Apache 2.0 |
+| 視線 | `openvino_adas` | Apache 2.0 (Open Model Zoo、optional) |
 | 表情 | `hsemotion` | Apache 2.0 (重み含む) |
 
 ### 研究 / 非商用 SOTA

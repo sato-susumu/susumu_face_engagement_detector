@@ -17,9 +17,9 @@
 | 5 | 完了 | README/Makefile 整備、launch 整理 |
 | 5+ | 完了 | 成果物の `outputs/` 集約、`eval/visualize.py` で 3 カテゴリの図 PNG 自動生成、レポートに図埋め込み、**レガシー完全削除** (旧ノード/launch/scripts/docs/test_images/test/legacy/build成果物) |
 
-**最終テスト数**: 57/57 緑 (unit 38 + integration 9)。
+**最終テスト数**: unit / integration とも緑 (最新件数は pytest 出力を参照)。
 **成果物**: `outputs/{baselines,figures,reports}/` に集約、`make outputs` 一発で再生成。
-**現役ノード**: 5 個 (face_detection / face_recognition / head_pose / expression / engagement)。
+**現役ノード**: 6 個 (face_detection / face_recognition / head_pose / gaze / expression / engagement)。`gaze_node` は OpenVINO モデル配置時だけ有効化する optional ノード。
 **リポジトリサイズ**: ~3.9 MB (build/install/log 除く)。
 
 
@@ -66,6 +66,7 @@
 | 顔認識 (fallback) | dlib face_recognition (128次元) | Boost SL + パブリックドメイン | 既存ベースライン維持 | - | 重み完全クリーン |
 | 頭部姿勢 | 6DRepNet | MIT | 動作可 | 高速 | AFLW2000 MAE 3.97°、ROS 2ラッパ既存 (`6DRepNet_ros`) |
 | 頭部姿勢 (CPU fallback) | MediaPipe Face Landmarker + solvePnP | Apache 2.0 | 30+ FPS | - | MAE 5-10° 程度 |
+| 視線推定 | OpenVINO gaze-estimation-adas-0002 | Apache 2.0 | CPU可 | - | 左右目 crop + head pose を入力。簡易ランドマーク推定の代替として optional 採用 |
 | 表情認識 | HSEmotion-ONNX | Apache 2.0 (重み含む) | リアルタイム | 高速 | AffectNet 8-class 62.5%, EfficientNet系 |
 | トラッキング | ByteTrack (Python実装) | MIT | - | - | ID一貫性、`hri_face_detect` 内のIoUトラッカで代替も可 |
 
@@ -92,6 +93,7 @@
 /humans/faces/tracked             # IdsList — 現在検出中の顔ID
 /humans/faces/<id>/roi            # RegionOfInterestStamped
 /humans/faces/<id>/landmarks      # FacialLandmarks (任意)
+/humans/faces/<id>/gaze           # Vector3Stamped (任意)
 /humans/faces/<id>/expression     # Expression
 TF: camera_color_optical_frame → face_<id>  # 頭部6DoF姿勢
 /humans/persons/tracked           # IdsList
@@ -121,6 +123,11 @@ facial_landmark_node (新設・任意)
 head_pose_node (新設)
   ├─ backend: 6drepnet | mediapipe_pnp
   └─ pub: TF face_<id>, PoseStamped
+
+gaze_node (新設・任意)
+  ├─ backend: openvino_adas
+  ├─ 入力: 左右目 crop + head_pose
+  └─ pub: /humans/faces/<id>/gaze
 
 expression_node (新設)
   ├─ HSEmotion-ONNX

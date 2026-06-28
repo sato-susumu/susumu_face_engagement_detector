@@ -25,6 +25,7 @@ import numpy as np
 
 from susumu_face_engagement_detector.backends.detection import make_backend as make_detection_backend
 from susumu_face_engagement_detector.backends.expression import make_backend as make_expression_backend
+from susumu_face_engagement_detector.backends.gaze import make_backend as make_gaze_backend
 from susumu_face_engagement_detector.backends.headpose import (
     HeadPoseStabilizer,
     make_backend as make_headpose_backend,
@@ -108,6 +109,10 @@ class FaceAnnotation:
     yaw_deg: Optional[float] = None
     pitch_deg: Optional[float] = None
     roll_deg: Optional[float] = None
+    gaze_vector: Optional[Tuple[float, float, float]] = None
+    gaze_yaw_deg: Optional[float] = None
+    gaze_pitch_deg: Optional[float] = None
+    gaze_origin: Optional[Tuple[float, float]] = None
     engagement_score: Optional[float] = None
     engagement_state: Optional[str] = None
 
@@ -156,6 +161,8 @@ class EmbeddingTracker:
         self._tracked_bboxes: List[Optional[BBox]] = []
         self._tracked_missed: List[int] = []
         self._identity_encodings: Dict[str, np.ndarray] = {}
+        self._assigned_track_indices: set[int] = set()
+        self._assigned_identities: set[str] = set()
         self._in_frame = False
         self._next_id = 1
         if known_dir is not None:
@@ -175,17 +182,23 @@ class EmbeddingTracker:
 
     def start_frame(self, _frame_index: int) -> None:
         self._in_frame = True
+        self._assigned_track_indices.clear()
+        self._assigned_identities.clear()
         for idx in range(len(self._tracked_missed)):
             self._tracked_missed[idx] += 1
 
     def identify(self, encoding: Optional[np.ndarray], bbox: Optional[BBox] = None) -> str:
         if encoding is None:
             return "unidentified"
+        if self._in_frame and self._assigned_identity_match(encoding) is not None:
+            return "unidentified"
 
         match_idx = self._best_track_match(encoding, bbox)
         if match_idx is not None:
             self._update_track(match_idx, encoding, bbox)
-            return self._tracked_ids[match_idx]
+            identity = self._tracked_ids[match_idx]
+            self._mark_assigned(match_idx, identity)
+            return identity
 
         identity = self._known_identity(encoding) or self._tracked_identity(encoding)
         if identity is None:
@@ -196,6 +209,7 @@ class EmbeddingTracker:
         self._tracked_bboxes.append(bbox)
         self._tracked_missed.append(0)
         self._update_identity_encoding(identity, encoding)
+        self._mark_assigned(len(self._tracked_ids) - 1, identity)
         return identity
 
     def _best_track_match(self, encoding: Optional[np.ndarray], bbox: Optional[BBox]) -> Optional[int]:
@@ -203,6 +217,8 @@ class EmbeddingTracker:
             return None
         candidates: List[Tuple[float, float, int, int]] = []
         for idx, _tracked_id in enumerate(self._tracked_ids):
+            if self._in_frame and idx in self._assigned_track_indices:
+                continue
             if self._tracked_missed[idx] > self._max_missed_frames:
                 continue
 
@@ -251,6 +267,8 @@ class EmbeddingTracker:
         if encoding is None:
             return None
         for known_id, known_encoding in zip(self._known_ids, self._known_encodings):
+            if self._in_frame and known_id in self._assigned_identities:
+                continue
             if self._match(known_encoding, encoding):
                 return known_id
         return None
@@ -260,12 +278,27 @@ class EmbeddingTracker:
             return None
         best: Optional[Tuple[float, str]] = None
         for identity, identity_encoding in self._identity_encodings.items():
+            if self._in_frame and identity in self._assigned_identities:
+                continue
             distance = self._embedding_distance(identity_encoding, encoding)
             if distance is None or distance > self._tolerance:
                 continue
             if best is None or distance < best[0]:
                 best = (distance, identity)
         return best[1] if best is not None else None
+
+    def _assigned_identity_match(self, encoding: np.ndarray) -> Optional[str]:
+        for identity in self._assigned_identities:
+            identity_encoding = self._identity_encodings.get(identity)
+            if identity_encoding is not None and self._match(identity_encoding, encoding):
+                return identity
+        return None
+
+    def _mark_assigned(self, track_idx: int, identity: str) -> None:
+        if not self._in_frame:
+            return
+        self._assigned_track_indices.add(track_idx)
+        self._assigned_identities.add(identity)
 
     def _update_identity_encoding(self, identity: str, encoding: Optional[np.ndarray]) -> None:
         if encoding is None:
@@ -569,6 +602,38 @@ def _draw_head_pose_arrow(
     )
 
 
+def _draw_gaze_arrow(
+    frame: np.ndarray,
+    box: BBox,
+    origin: Optional[Tuple[float, float]],
+    yaw: Optional[float],
+    pitch: Optional[float],
+    color: Tuple[int, int, int],
+) -> None:
+    if origin is None or yaw is None or pitch is None:
+        return
+    top, right, bottom, left = box
+    ox = int(round(left + origin[0]))
+    oy = int(round(top + origin[1]))
+    face_width = max(1, right - left)
+    length = max(34, int(round(face_width * 0.48)))
+    dx = np.clip(math.tan(math.radians(yaw)), -1.0, 1.0) * length
+    dy = -np.clip(math.tan(math.radians(pitch)), -1.0, 1.0) * length
+    end = (int(round(ox + dx)), int(round(oy + dy)))
+    cv2.arrowedLine(frame, (ox, oy), end, color, 2, tipLength=0.25)
+    cv2.circle(frame, (ox, oy), 3, color, -1)
+    cv2.putText(
+        frame,
+        "gaze",
+        (end[0] + 4, end[1] - 4),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.42,
+        color,
+        1,
+        cv2.LINE_AA,
+    )
+
+
 def _draw_annotation(frame: np.ndarray, ann: FaceAnnotation) -> None:
     top, right, bottom, left = ann.bbox
     face_width = right - left
@@ -592,6 +657,7 @@ def _draw_annotation(frame: np.ndarray, ann: FaceAnnotation) -> None:
         return
     if compact:
         _draw_head_pose_arrow(frame, ann.bbox, ann.yaw_deg, ann.pitch_deg, (80, 220, 120))
+        _draw_gaze_arrow(frame, ann.bbox, ann.gaze_origin, ann.gaze_yaw_deg, ann.gaze_pitch_deg, (255, 216, 96))
         return
 
     lines = [
@@ -601,6 +667,11 @@ def _draw_annotation(frame: np.ndarray, ann: FaceAnnotation) -> None:
         f"yaw {_format_optional(visual_yaw, 'deg')} "
         f"pitch {_format_optional(ann.pitch_deg, 'deg')}",
     ]
+    if ann.gaze_vector is not None:
+        lines.append(
+            f"gaze yaw {_format_optional(ann.gaze_yaw_deg, 'deg')} "
+            f"pitch {_format_optional(ann.gaze_pitch_deg, 'deg')}"
+        )
     y = bottom + 22
     for line in lines:
         if y > frame.shape[0] - 8:
@@ -609,6 +680,7 @@ def _draw_annotation(frame: np.ndarray, ann: FaceAnnotation) -> None:
         y += 22
 
     _draw_head_pose_arrow(frame, ann.bbox, ann.yaw_deg, ann.pitch_deg, (80, 220, 120))
+    _draw_gaze_arrow(frame, ann.bbox, ann.gaze_origin, ann.gaze_yaw_deg, ann.gaze_pitch_deg, (255, 216, 96))
     if face_width >= 120:
         gauge_y = max(0, top - 74) if top > 88 else min(frame.shape[0] - 70, bottom + 78)
         gauge_x = min(frame.shape[1] - 56, max(0, right + 8))
@@ -631,11 +703,12 @@ def _draw_frame_panel(
     elapsed_s: float,
 ) -> None:
     headpose_label = "off" if args.no_headpose else f"{args.headpose_backend}+stable"
+    gaze_label = "off" if args.no_gaze else args.gaze_backend
     lines = [
         f"frame {frame_index} | {fps:.1f} fps source | faces {faces}",
         f"det={args.detection_backend} rec={args.recognition_backend} expr={args.expression_backend}",
-        f"head={headpose_label} | elapsed {elapsed_s:.1f}s",
-        "green=head pose",
+        f"head={headpose_label} gaze={gaze_label} | elapsed {elapsed_s:.1f}s",
+        "green=head pose cyan=gaze",
     ]
     x, y = 12, 24
     for line in lines:
@@ -659,10 +732,14 @@ def _build_annotations(
     recognition_backend,
     expression_backend,
     headpose_backend,
+    gaze_backend,
     headpose_stabilizers: DefaultDict[str, HeadPoseStabilizer],
     tracker: EmbeddingTracker,
     scorers: DefaultDict[str, EngagementScorer],
     min_identity_face_px: int,
+    identity_score_threshold: float,
+    identity_max_head_yaw_deg: float,
+    identity_max_head_pitch_deg: float,
 ) -> List[FaceAnnotation]:
     height, width = frame.shape[:2]
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -676,9 +753,9 @@ def _build_annotations(
         detection_score = float(raw_box[4])
         face_width = right - left
         face_height = bottom - top
-        trackable = min(face_width, face_height) >= min_identity_face_px
+        size_trackable = min(face_width, face_height) >= min_identity_face_px
 
-        if not trackable:
+        if not size_trackable:
             annotations.append(
                 FaceAnnotation(
                     bbox=box,
@@ -687,17 +764,6 @@ def _build_annotations(
                 )
             )
             continue
-
-        embedding = None
-        if detection_result.encodings is not None and i < len(detection_result.encodings):
-            embedding = detection_result.encodings[i]
-        elif recognition_backend is not None:
-            try:
-                embedding = recognition_backend.embed(rgb, box)
-            except Exception as exc:
-                print(f"warn: recognition failed for face {i}: {exc}", file=sys.stderr)
-
-        identity = tracker.identify(embedding, box)
 
         crop_box = _pad_box(box, width, height)
         face_crop = _crop(frame, crop_box) if crop_box is not None else _crop(frame, box)
@@ -720,12 +786,56 @@ def _build_annotations(
             except Exception as exc:
                 print(f"warn: head pose failed for face {i}: {exc}", file=sys.stderr)
 
-        if ypr is not None and identity != "unidentified":
-            ypr = headpose_stabilizers[identity].update(ypr)
+        raw_yaw = normalize_pose_angle(ypr[0]) if ypr is not None else None
+        raw_pitch = normalize_pose_angle(ypr[1]) if ypr is not None else None
+        raw_roll = normalize_pose_angle(ypr[2]) if ypr is not None else None
 
-        yaw = normalize_pose_angle(ypr[0]) if ypr is not None else None
-        pitch = normalize_pose_angle(ypr[1]) if ypr is not None else None
-        roll = normalize_pose_angle(ypr[2]) if ypr is not None else None
+        pose_allows_identity = True
+        if headpose_backend is not None:
+            pose_allows_identity = (
+                raw_yaw is not None
+                and raw_pitch is not None
+                and abs(raw_yaw) <= identity_max_head_yaw_deg
+                and abs(raw_pitch) <= identity_max_head_pitch_deg
+            )
+        identity_allowed = (
+            detection_score >= identity_score_threshold
+            and pose_allows_identity
+        )
+
+        embedding = None
+        if identity_allowed:
+            if detection_result.encodings is not None and i < len(detection_result.encodings):
+                embedding = detection_result.encodings[i]
+            elif recognition_backend is not None:
+                try:
+                    embedding = recognition_backend.embed(rgb, box)
+                except Exception as exc:
+                    print(f"warn: recognition failed for face {i}: {exc}", file=sys.stderr)
+
+        identity = tracker.identify(embedding, box) if identity_allowed else "unidentified"
+
+        stable_ypr = ypr
+        if ypr is not None and identity != "unidentified":
+            stable_ypr = headpose_stabilizers[identity].update(ypr)
+
+        yaw = normalize_pose_angle(stable_ypr[0]) if stable_ypr is not None else raw_yaw
+        pitch = normalize_pose_angle(stable_ypr[1]) if stable_ypr is not None else raw_pitch
+        roll = normalize_pose_angle(stable_ypr[2]) if stable_ypr is not None else raw_roll
+
+        gaze_result = None
+        gaze_crop = _crop(frame, box)
+        if (
+            gaze_backend is not None
+            and gaze_crop.size
+            and yaw is not None
+            and pitch is not None
+            and roll is not None
+        ):
+            try:
+                gaze_result = gaze_backend.estimate(gaze_crop, (yaw, pitch, roll))
+            except Exception as exc:
+                print(f"warn: gaze failed for face {i}: {exc}", file=sys.stderr)
 
         state = None
         if identity != "unidentified":
@@ -747,6 +857,10 @@ def _build_annotations(
                 yaw_deg=yaw,
                 pitch_deg=pitch,
                 roll_deg=roll,
+                gaze_vector=gaze_result.vector if gaze_result is not None else None,
+                gaze_yaw_deg=gaze_result.yaw_deg if gaze_result is not None else None,
+                gaze_pitch_deg=gaze_result.pitch_deg if gaze_result is not None else None,
+                gaze_origin=gaze_result.eye_center if gaze_result is not None else None,
                 engagement_score=state.score if state is not None else None,
                 engagement_state=state_name(state.level) if state is not None else "UNKNOWN",
             )
@@ -806,6 +920,26 @@ def run(args: argparse.Namespace) -> Path:
     recognition_backend = None if args.no_recognition else make_recognition_backend(args.recognition_backend)
     expression_backend = None if args.no_expression else make_expression_backend(args.expression_backend)
     headpose_backend = None if args.no_headpose else make_headpose_backend(args.headpose_backend)
+    gaze_backend = None
+    gaze_enabled = not args.no_gaze
+    if args.no_headpose and gaze_enabled:
+        print("warn: gaze disabled because head pose is disabled", file=sys.stderr)
+        gaze_enabled = False
+        args.no_gaze = True
+    if gaze_enabled:
+        try:
+            gaze_backend = make_gaze_backend(
+                args.gaze_backend,
+                model_path=args.gaze_model_path,
+                device=args.gaze_device,
+                min_eye_size=args.gaze_min_eye_px,
+                max_head_yaw_deg=args.gaze_max_head_yaw_deg,
+                max_head_pitch_deg=args.gaze_max_head_pitch_deg,
+            )
+        except Exception as exc:
+            print(f"warn: gaze disabled: {exc}", file=sys.stderr)
+            gaze_enabled = False
+            args.no_gaze = True
     tracker = EmbeddingTracker(
         Path(args.known_faces_dir) if args.known_faces_dir else None,
         tolerance=args.match_tolerance,
@@ -850,10 +984,14 @@ def run(args: argparse.Namespace) -> Path:
                     recognition_backend,
                     expression_backend,
                     headpose_backend,
+                    gaze_backend,
                     headpose_stabilizers,
                     tracker,
                     scorers,
                     args.min_identity_face_px,
+                    args.identity_score_threshold,
+                    args.identity_max_head_yaw_deg,
+                    args.identity_max_head_pitch_deg,
                 )
 
             annotated = frame.copy()
@@ -897,6 +1035,9 @@ def run(args: argparse.Namespace) -> Path:
         "headpose_smoothing_alpha": args.headpose_smoothing_alpha,
         "headpose_max_jump_deg": args.headpose_max_jump_deg,
         "headpose_reset_after_missed": args.headpose_reset_after_missed,
+        "gaze_backend": args.gaze_backend if gaze_enabled else None,
+        "gaze_model_path": args.gaze_model_path if gaze_enabled else None,
+        "gaze_device": args.gaze_device if gaze_enabled else None,
         "known_faces_loaded": tracker.known_count,
         "track_instances_created": tracker.tracked_count,
         "unique_identities_created": tracker.identity_count,
@@ -904,6 +1045,9 @@ def run(args: argparse.Namespace) -> Path:
         "identity_margin": args.identity_margin,
         "max_missed_frames": args.max_missed_frames,
         "min_identity_face_px": args.min_identity_face_px,
+        "identity_score_threshold": args.identity_score_threshold,
+        "identity_max_head_yaw_deg": args.identity_max_head_yaw_deg,
+        "identity_max_head_pitch_deg": args.identity_max_head_pitch_deg,
     }
     sidecar = output_path.with_suffix(output_path.suffix + ".json")
     sidecar.write_text(json.dumps(metadata, indent=2, ensure_ascii=False) + "\n")
@@ -945,6 +1089,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-missed-frames", type=int, default=30)
     parser.add_argument("--embedding-alpha", type=float, default=0.25)
     parser.add_argument("--min-identity-face-px", type=int, default=110)
+    parser.add_argument(
+        "--identity-score-threshold",
+        type=float,
+        default=0.9,
+        help="Minimum detector confidence required before assigning a user ID.",
+    )
+    parser.add_argument("--identity-max-head-yaw-deg", type=float, default=40.0)
+    parser.add_argument("--identity-max-head-pitch-deg", type=float, default=25.0)
     parser.add_argument("--no-recognition", action="store_true")
 
     parser.add_argument("--expression-backend", default="hsemotion", choices=["hsemotion"])
@@ -952,8 +1104,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--headpose-smoothing-alpha", type=float, default=0.35)
     parser.add_argument("--headpose-max-jump-deg", type=float, default=35.0)
     parser.add_argument("--headpose-reset-after-missed", type=int, default=10)
+    parser.add_argument("--gaze-backend", default="openvino_adas", choices=["openvino_adas"])
+    parser.add_argument(
+        "--gaze-model-path",
+        default=str(
+            Path.home()
+            / "models/gaze_estimation/intel/gaze-estimation-adas-0002/FP32/gaze-estimation-adas-0002.xml"
+        ),
+        help="OpenVINO gaze-estimation-adas-0002 XML path.",
+    )
+    parser.add_argument("--gaze-device", default="CPU")
+    parser.add_argument("--gaze-min-eye-px", type=int, default=8)
+    parser.add_argument("--gaze-max-head-yaw-deg", type=float, default=45.0)
+    parser.add_argument("--gaze-max-head-pitch-deg", type=float, default=35.0)
     parser.add_argument("--no-expression", action="store_true")
     parser.add_argument("--no-headpose", action="store_true")
+    parser.add_argument("--no-gaze", action="store_true")
     return parser
 
 

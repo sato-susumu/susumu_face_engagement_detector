@@ -14,9 +14,15 @@ VIDEO_DEMO_SCORE_THRESHOLD ?= 0.8
 VIDEO_DEMO_MATCH_TOLERANCE ?= 0.75
 VIDEO_DEMO_IDENTITY_MARGIN ?= 0.15
 VIDEO_DEMO_MIN_IDENTITY_FACE_PX ?= 110
+VIDEO_DEMO_IDENTITY_SCORE_THRESHOLD ?= 0.90
+VIDEO_DEMO_IDENTITY_MAX_HEAD_YAW_DEG ?= 40
+VIDEO_DEMO_IDENTITY_MAX_HEAD_PITCH_DEG ?= 25
 VIDEO_DEMO_HEADPOSE_SMOOTHING_ALPHA ?= 0.35
 VIDEO_DEMO_HEADPOSE_MAX_JUMP_DEG ?= 35
 VIDEO_DEMO_HEADPOSE_RESET_AFTER_MISSED ?= 10
+VIDEO_DEMO_GAZE_MODEL ?= $(HOME)/models/gaze_estimation/intel/gaze-estimation-adas-0002/FP32/gaze-estimation-adas-0002.xml
+VIDEO_DEMO_GAZE_DEVICE ?= CPU
+VIDEO_DEMO_NO_GAZE ?=
 VIDEO_DEMO_OUTPUT ?= $(OUTPUTS_DIR)/runs/video_demo/annotated_engagement_demo.mp4
 VIDEO_DEMO_MULTI_START ?= 35
 VIDEO_DEMO_MULTI_SECONDS ?= 90
@@ -156,9 +162,14 @@ video-demo:
 		--match-tolerance $(VIDEO_DEMO_MATCH_TOLERANCE) \
 		--identity-margin $(VIDEO_DEMO_IDENTITY_MARGIN) \
 		--min-identity-face-px $(VIDEO_DEMO_MIN_IDENTITY_FACE_PX) \
+		--identity-score-threshold $(VIDEO_DEMO_IDENTITY_SCORE_THRESHOLD) \
+		--identity-max-head-yaw-deg $(VIDEO_DEMO_IDENTITY_MAX_HEAD_YAW_DEG) \
+		--identity-max-head-pitch-deg $(VIDEO_DEMO_IDENTITY_MAX_HEAD_PITCH_DEG) \
 		--headpose-smoothing-alpha $(VIDEO_DEMO_HEADPOSE_SMOOTHING_ALPHA) \
 		--headpose-max-jump-deg $(VIDEO_DEMO_HEADPOSE_MAX_JUMP_DEG) \
 		--headpose-reset-after-missed $(VIDEO_DEMO_HEADPOSE_RESET_AFTER_MISSED) \
+		--gaze-model-path $(VIDEO_DEMO_GAZE_MODEL) \
+		--gaze-device $(VIDEO_DEMO_GAZE_DEVICE) $(if $(VIDEO_DEMO_NO_GAZE),--no-gaze) \
 		--model-path $(YUNET_MODEL)
 
 .PHONY: video-demo-multi

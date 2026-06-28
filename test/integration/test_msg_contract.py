@@ -54,3 +54,7 @@ def test_face_detection_node_module_loads() -> None:
     """The modified face_detection_node imports cleanly with new vision_msgs deps."""
     # Importing the node module should not raise.
     from susumu_face_engagement_detector import face_detection_node  # noqa: F401
+
+
+def test_gaze_node_module_loads() -> None:
+    from susumu_face_engagement_detector import gaze_node  # noqa: F401

@@ -29,6 +29,7 @@ setup(
             'face_detection_node = susumu_face_engagement_detector.face_detection_node:main',
             'face_recognition_node = susumu_face_engagement_detector.face_recognition_node:main',
             'head_pose_node = susumu_face_engagement_detector.head_pose_node:main',
+            'gaze_node = susumu_face_engagement_detector.gaze_node:main',
             'expression_node = susumu_face_engagement_detector.expression_node:main',
             'engagement_node = susumu_face_engagement_detector.engagement_node:main',
             'face_engagement_video_demo = eval.video_demo:main',
